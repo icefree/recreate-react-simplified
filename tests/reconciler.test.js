@@ -1,0 +1,312 @@
+/**
+ * Phase 3 测试 — Reconciler
+ *
+ * 运行方式：pnpm test
+ *
+ * 验证协调器的核心能力：
+ * - 新增节点
+ * - 删除节点
+ * - 替换节点（类型变化）
+ * - 属性更新（新增/修改/删除）
+ * - 文本节点更新
+ * - 子节点增减
+ * - key 驱动的列表协调
+ * - Root API（createRoot/render/unmount）
+ *
+ * @vitest-environment jsdom
+ */
+
+import { describe, it, expect, beforeEach } from 'vitest'
+import { createElement } from '../src/mini-react/createElement.js'
+import { reconcile } from '../src/mini-react/reconciler.js'
+import { createRoot } from '../src/mini-react/root.js'
+
+describe('reconcile', () => {
+  let container
+
+  beforeEach(() => {
+    container = document.createElement('div')
+  })
+
+  // ─── 新增 ─────────────────────────────────────────────────
+
+  it('oldVNode 为 null 时应创建并挂载新 DOM', () => {
+    const vnode = createElement('p', null, 'Hello')
+    reconcile(container, null, vnode)
+
+    expect(container.innerHTML).toBe('<p>Hello</p>')
+  })
+
+  it('新增嵌套结构应正确挂载', () => {
+    const vnode = createElement(
+      'div',
+      { id: 'wrap' },
+      createElement('span', null, 'inner')
+    )
+    reconcile(container, null, vnode)
+
+    expect(container.querySelector('#wrap span').textContent).toBe('inner')
+  })
+
+  // ─── 删除 ─────────────────────────────────────────────────
+
+  it('newVNode 为 null 时应删除旧 DOM', () => {
+    const vnode = createElement('p', null, 'Bye')
+    reconcile(container, null, vnode)
+    expect(container.childNodes.length).toBe(1)
+
+    reconcile(container, vnode, null)
+    expect(container.childNodes.length).toBe(0)
+  })
+
+  // ─── 替换（类型变化） ─────────────────────────────────────
+
+  it('类型不同时应替换节点', () => {
+    const old = createElement('p', null, 'old')
+    reconcile(container, null, old)
+    expect(container.innerHTML).toBe('<p>old</p>')
+
+    const next = createElement('div', null, 'new')
+    reconcile(container, old, next)
+    expect(container.innerHTML).toBe('<div>new</div>')
+  })
+
+  // ─── 属性更新 ─────────────────────────────────────────────
+
+  it('类型相同时应更新属性而不重建 DOM', () => {
+    const old = createElement('div', { id: 'a', className: 'old' })
+    reconcile(container, null, old)
+    const domRef = container.firstChild
+
+    const next = createElement('div', { id: 'b', className: 'new' })
+    reconcile(container, old, next)
+
+    // DOM 节点应该是同一个（没有重建）
+    expect(container.firstChild).toBe(domRef)
+    expect(container.firstChild.id).toBe('b')
+    expect(container.firstChild.className).toBe('new')
+  })
+
+  it('应删除旧属性中不再存在的属性', () => {
+    const old = createElement('div', { id: 'test', className: 'foo' })
+    reconcile(container, null, old)
+    expect(container.firstChild.className).toBe('foo')
+
+    const next = createElement('div', { id: 'test' })
+    reconcile(container, old, next)
+    expect(container.firstChild.className).toBe('')
+  })
+
+  it('应正确更新 style', () => {
+    const old = createElement('div', { style: { color: 'red', fontSize: '16px' } })
+    reconcile(container, null, old)
+
+    const next = createElement('div', { style: { color: 'blue' } })
+    reconcile(container, old, next)
+
+    expect(container.firstChild.style.color).toBe('blue')
+    // fontSize 不再存在于新 style，应被清除
+    expect(container.firstChild.style.fontSize).toBe('')
+  })
+
+  // ─── 文本节点更新 ─────────────────────────────────────────
+
+  it('文本内容变化时只更新 nodeValue', () => {
+    const old = createElement('p', null, 'Hello')
+    reconcile(container, null, old)
+
+    const textNode = container.firstChild.firstChild
+    const next = createElement('p', null, 'World')
+    reconcile(container, old, next)
+
+    // p 节点不变
+    expect(container.firstChild.nodeName).toBe('P')
+    // 文本节点内容已更新
+    expect(container.firstChild.textContent).toBe('World')
+  })
+
+  // ─── 子节点增减 ─────────────────────────────────────────
+
+  it('应能添加新的子节点', () => {
+    const old = createElement('ul', null, createElement('li', null, 'A'))
+    reconcile(container, null, old)
+    expect(container.querySelectorAll('li').length).toBe(1)
+
+    const next = createElement(
+      'ul',
+      null,
+      createElement('li', null, 'A'),
+      createElement('li', null, 'B')
+    )
+    reconcile(container, old, next)
+    expect(container.querySelectorAll('li').length).toBe(2)
+    expect(container.querySelectorAll('li')[1].textContent).toBe('B')
+  })
+
+  it('应能删除多余的子节点', () => {
+    const old = createElement(
+      'ul',
+      null,
+      createElement('li', null, 'A'),
+      createElement('li', null, 'B'),
+      createElement('li', null, 'C')
+    )
+    reconcile(container, null, old)
+    expect(container.querySelectorAll('li').length).toBe(3)
+
+    const next = createElement('ul', null, createElement('li', null, 'A'))
+    reconcile(container, old, next)
+    expect(container.querySelectorAll('li').length).toBe(1)
+  })
+})
+
+// ─── key 驱动的列表协调 ──────────────────────────────────────
+
+describe('reconcile with keys', () => {
+  let container
+
+  beforeEach(() => {
+    container = document.createElement('div')
+  })
+
+  it('key 稳定时应复用 DOM 节点', () => {
+    const old = createElement(
+      'ul',
+      null,
+      createElement('li', { key: 'a' }, 'A'),
+      createElement('li', { key: 'b' }, 'B'),
+      createElement('li', { key: 'c' }, 'C')
+    )
+    reconcile(container, null, old)
+
+    const domA = container.querySelectorAll('li')[0]
+    const domB = container.querySelectorAll('li')[1]
+
+    // 重排：B, A, C
+    const next = createElement(
+      'ul',
+      null,
+      createElement('li', { key: 'b' }, 'B'),
+      createElement('li', { key: 'a' }, 'A'),
+      createElement('li', { key: 'c' }, 'C')
+    )
+    reconcile(container, old, next)
+
+    const lis = container.querySelectorAll('li')
+    expect(lis.length).toBe(3)
+    expect(lis[0].textContent).toBe('B')
+    expect(lis[1].textContent).toBe('A')
+    // key 匹配的 DOM 节点被复用
+    expect(lis[0]).toBe(domB)
+    expect(lis[1]).toBe(domA)
+  })
+
+  it('应正确插入新 key 的节点', () => {
+    const old = createElement(
+      'ul',
+      null,
+      createElement('li', { key: 'a' }, 'A'),
+      createElement('li', { key: 'c' }, 'C')
+    )
+    reconcile(container, null, old)
+
+    const next = createElement(
+      'ul',
+      null,
+      createElement('li', { key: 'a' }, 'A'),
+      createElement('li', { key: 'b' }, 'B'),
+      createElement('li', { key: 'c' }, 'C')
+    )
+    reconcile(container, old, next)
+
+    const lis = container.querySelectorAll('li')
+    expect(lis.length).toBe(3)
+    expect(lis[0].textContent).toBe('A')
+    expect(lis[1].textContent).toBe('B')
+    expect(lis[2].textContent).toBe('C')
+  })
+
+  it('应正确删除不存在的 key', () => {
+    const old = createElement(
+      'ul',
+      null,
+      createElement('li', { key: 'a' }, 'A'),
+      createElement('li', { key: 'b' }, 'B'),
+      createElement('li', { key: 'c' }, 'C')
+    )
+    reconcile(container, null, old)
+
+    const next = createElement(
+      'ul',
+      null,
+      createElement('li', { key: 'a' }, 'A'),
+      createElement('li', { key: 'c' }, 'C')
+    )
+    reconcile(container, old, next)
+
+    const lis = container.querySelectorAll('li')
+    expect(lis.length).toBe(2)
+    expect(lis[0].textContent).toBe('A')
+    expect(lis[1].textContent).toBe('C')
+  })
+})
+
+// ─── Root API ────────────────────────────────────────────────
+
+describe('createRoot', () => {
+  let container
+
+  beforeEach(() => {
+    container = document.createElement('div')
+  })
+
+  it('root.render 应进行首次挂载', () => {
+    const root = createRoot(container)
+    root.render(createElement('p', null, 'Hello Root'))
+
+    expect(container.innerHTML).toBe('<p>Hello Root</p>')
+  })
+
+  it('root.render 多次调用应增量更新', () => {
+    const root = createRoot(container)
+    root.render(createElement('p', null, 'v1'))
+    const domRef = container.firstChild
+
+    root.render(createElement('p', null, 'v2'))
+    // 应该是同一个 DOM 节点（原地更新，非重建）
+    expect(container.firstChild).toBe(domRef)
+    expect(container.firstChild.textContent).toBe('v2')
+  })
+
+  it('root.unmount 应清空容器', () => {
+    const root = createRoot(container)
+    root.render(createElement('div', null, 'content'))
+    expect(container.childNodes.length).toBe(1)
+
+    root.unmount()
+    expect(container.childNodes.length).toBe(0)
+  })
+
+  it('同一容器 createRoot 两次应返回同一 root（幂等）', () => {
+    const root1 = createRoot(container)
+    const root2 = createRoot(container)
+    expect(root1).toBe(root2)
+  })
+
+  it('不同容器应互不影响', () => {
+    const container2 = document.createElement('div')
+    const root1 = createRoot(container)
+    const root2 = createRoot(container2)
+
+    root1.render(createElement('p', null, 'Root 1'))
+    root2.render(createElement('p', null, 'Root 2'))
+
+    expect(container.textContent).toBe('Root 1')
+    expect(container2.textContent).toBe('Root 2')
+
+    root1.unmount()
+    expect(container.childNodes.length).toBe(0)
+    // root2 不受影响
+    expect(container2.textContent).toBe('Root 2')
+  })
+})

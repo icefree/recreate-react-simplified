@@ -1,110 +1,131 @@
 /**
  * ============================================================
- * Mini-React: render
+ * Mini-React: render — DOM 创建与属性操作
  * ============================================================
  *
- * 🎯 你的任务：实现 render 函数
+ * 职责：
+ * 1. createDom   — 根据 VNode 创建对应的真实 DOM 节点
+ * 2. updateProps  — 将 props 差异应用到 DOM 上（支持新增/更新/删除）
+ * 3. render       — Phase 1/2 的全量挂载入口（Phase 3 开始由 reconciler 接管）
  *
- * render 负责把 VNode 树转换为真实的 DOM 树，并挂载到容器中。
- *
- *   VNode                          Real DOM
- *   {                              <div id="app">
- *     type: 'div',          →        <h1>Hello</h1>
- *     props: {                       World
- *       id: 'app',                 </div>
- *       children: [...]
- *     }
- *   }
- *
- * ============================================================
- * 规则：
- * 1. TEXT_ELEMENT → document.createTextNode
- * 2. 其他类型 → document.createElement
- * 3. 遍历 props，设置 DOM 属性（跳过 children）
- * 4. 递归渲染子节点
- * 5. 挂载到父容器
  * ============================================================
  */
 
 import { TEXT_ELEMENT } from './createElement.js'
 
+// ─── DOM 节点创建 ─────────────────────────────────────────────
+
 /**
- * 将 VNode 渲染为真实 DOM 并挂载到容器中
+ * 根据 VNode 创建真实 DOM 节点（不包含子节点）
  *
- * @param {Object} vnode - 虚拟 DOM 节点（createElement 的返回值）
- * @param {HTMLElement} container - 挂载目标容器
- *
- * 示例：
- *   render(
- *     createElement('div', { id: 'app' }, 'Hello'),
- *     document.getElementById('root')
- *   )
- *   // 结果：<div id="root"><div id="app">Hello</div></div>
+ * @param {Object} vnode - 虚拟 DOM 节点
+ * @returns {HTMLElement|Text} 真实 DOM 节点
  */
-export function render(vnode, container) {
-  // TODO: 实现这个函数
-  // 步骤：
-  //
-  // 1. 创建 DOM 节点
-  //    - 如果 vnode.type === TEXT_ELEMENT → document.createTextNode(vnode.props.nodeValue)
-  //    - 否则 → document.createElement(vnode.type)
-  //
-  // 2. 设置属性（调用 updateProps）
-  //
-  // 3. 递归渲染子节点
-  //    - 遍历 vnode.props.children
-  //    - 对每个 child 递归调用 render(child, dom)
-  //
-  // 4. 挂载到容器
-  //    - container.appendChild(dom)
-  let dom
-  if(vnode.type === TEXT_ELEMENT) {
-      dom = document.createTextNode(vnode.props.nodeValue)
-  }else{
-      dom = document.createElement(vnode.type)
+export function createDom(vnode) {
+  if (vnode.type === TEXT_ELEMENT) {
+    return document.createTextNode(vnode.props.nodeValue)
   }
-  updateProps(dom, vnode.props) 
-  vnode.props.children.forEach(child => render(child, dom))
-  container.appendChild(dom)
+  const dom = document.createElement(vnode.type)
+  updateProps(dom, {}, vnode.props)
+  return dom
+}
+
+// ─── 属性操作 ─────────────────────────────────────────────────
+
+/**
+ * 比较新旧 props，将差异应用到 DOM 节点
+ *
+ * 支持的属性类型：
+ * - children    — 跳过，由 reconciler 单独处理
+ * - className   — 映射到 dom.className
+ * - style       — 对象形式，逐属性 diff
+ * - on*         — 事件监听器（先简单处理，Phase 7 改为事件委托）
+ * - key         — 跳过，仅供 reconciler 使用
+ * - 其他        — 通过 dom[key] 直接赋值
+ *
+ * @param {HTMLElement} dom     - 真实 DOM 节点
+ * @param {Object}      oldProps - 旧属性（首次渲染时传 {}）
+ * @param {Object}      newProps - 新属性
+ */
+export function updateProps(dom, oldProps, newProps) {
+  const skipKeys = new Set(['children', 'key'])
+
+  // 1. 删除旧属性中不再存在的
+  Object.keys(oldProps).forEach(key => {
+    if (skipKeys.has(key)) return
+    if (!(key in newProps)) {
+      removeProp(dom, key, oldProps[key])
+    }
+  })
+
+  // 2. 新增或更新属性
+  Object.keys(newProps).forEach(key => {
+    if (skipKeys.has(key)) return
+    if (oldProps[key] === newProps[key]) return // 值相同则跳过
+    setProp(dom, key, newProps[key], oldProps[key])
+  })
 }
 
 /**
- * 将 VNode 的 props 设置到真实 DOM 节点上
- *
- * @param {HTMLElement} dom - 真实 DOM 节点
- * @param {Object} props - VNode 的 props
- *
- * 需要处理的情况：
- * - 跳过 children（不是 DOM 属性）
- * - className → dom.className = value（或使用 setAttribute('class', value)）
- * - style 对象 → 遍历并设置 dom.style[key] = value
- * - 事件属性（on 开头）→ Phase 7 再处理，现在可以先跳过
- * - 其他普通属性 → dom[key] = value 或 dom.setAttribute(key, value)
+ * 设置单个属性到 DOM 节点
  */
-function updateProps(dom, props) {
-  // TODO: 实现这个函数
-  // 步骤：
-  //
-  // 遍历 props 中的每个 key：
-  //   1. 跳过 key === 'children'
-  //   2. 如果 key === 'className' → dom.className = props[key]
-  //   3. 如果 key === 'style' 且值是对象 → Object.assign(dom.style, props[key])
-  //   4. 如果 key 以 'on' 开头 → 暂时用 dom.addEventListener 直接绑定
-  //      （例如 onClick → dom.addEventListener('click', props[key])）
-  //   5. 其他 → dom.setAttribute(key, props[key])
-  //
-  // 💡 提示：你也可以用 dom[key] = value 来设置属性，
-  //    但 setAttribute 更通用，两种方式各有优劣，可以先用一种
-  Object.keys(props).forEach(key => {
-    if(key === 'children') return
-    if(key === 'className') {
-        dom.className = props[key]
-    }else if(key === 'style') {
-        Object.assign(dom.style, props[key])
-    }else if(key.startsWith('on')) {
-        dom.addEventListener(key.slice(2).toLowerCase(), props[key])
-    }else{
-        dom[key] = props[key]
+function setProp(dom, key, value, oldValue) {
+  if (key === 'className') {
+    dom.className = value || ''
+  } else if (key === 'style') {
+    if (typeof value === 'object') {
+      // 清除旧 style 中新 style 不再包含的属性
+      if (typeof oldValue === 'object' && oldValue) {
+        Object.keys(oldValue).forEach(styleKey => {
+          if (!(styleKey in value)) {
+            dom.style[styleKey] = ''
+          }
+        })
+      }
+      Object.assign(dom.style, value)
+    } else {
+      dom.style.cssText = value || ''
     }
-  })  
+  } else if (key.startsWith('on')) {
+    const eventName = key.slice(2).toLowerCase()
+    // 移除旧事件，绑定新事件
+    if (oldValue) {
+      dom.removeEventListener(eventName, oldValue)
+    }
+    dom.addEventListener(eventName, value)
+  } else {
+    // nodeValue、id 等常规属性
+    dom[key] = value
+  }
+}
+
+/**
+ * 从 DOM 节点移除单个属性
+ */
+function removeProp(dom, key, oldValue) {
+  if (key === 'className') {
+    dom.className = ''
+  } else if (key === 'style') {
+    dom.style.cssText = ''
+  } else if (key.startsWith('on')) {
+    const eventName = key.slice(2).toLowerCase()
+    dom.removeEventListener(eventName, oldValue)
+  } else {
+    dom[key] = ''
+  }
+}
+
+// ─── Phase 1/2 简易渲染入口 ───────────────────────────────────
+
+/**
+ * 将 VNode 渲染为真实 DOM 并挂载到容器中
+ * （全量挂载，不做 Diff。Phase 3 开始请使用 createRoot API）
+ *
+ * @param {Object} vnode       - 虚拟 DOM 节点
+ * @param {HTMLElement} container - 挂载目标容器
+ */
+export function render(vnode, container) {
+  const dom = createDom(vnode)
+  vnode.props.children.forEach(child => render(child, dom))
+  container.appendChild(dom)
 }
