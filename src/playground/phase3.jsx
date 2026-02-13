@@ -18,7 +18,12 @@ const { createElement, createRoot } = MiniReact
 // ─── 状态模拟（Phase 5 才会有 useState） ─────────────────────
 
 let count = 0
-let items = ['🍎 Apple', '🍌 Banana', '🍒 Cherry']
+let nextId = 3
+let items = [
+  { id: 0, text: '🍎 Apple' },
+  { id: 1, text: '🍌 Banana' },
+  { id: 2, text: '🍒 Cherry' },
+]
 let theme = 'dark'
 
 // ─── 构建 VNode 树 ──────────────────────────────────────────
@@ -96,7 +101,7 @@ function buildApp() {
           createElement(
             'li',
             {
-              key: item,
+              key: item.id,
               style: {
                 padding: '0.75rem 1rem',
                 marginBottom: '0.5rem',
@@ -107,7 +112,7 @@ function buildApp() {
                 alignItems: 'center',
               },
             },
-            createElement('span', null, `${item}`),
+            createElement('span', null, item.text),
             createElement(
               'span',
               { style: { color: '#888', fontSize: '0.8rem' } },
@@ -236,7 +241,7 @@ document.addEventListener('click', (e) => {
       rerender()
       break
     case 'btn-addItem':
-      items = [...items, '🍇 Grape']
+      items = [...items, { id: nextId++, text: '🍇 Grape' }]
       rerender()
       break
     case 'btn-removeItem':
