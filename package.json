@@ -1,0 +1,18 @@
+{
+  "name": "mini-react",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "A simplified React implementation for learning purposes",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vite": "^7.3.1",
+    "vitest": "^4.0.18"
+  }
+}
