@@ -58,4 +58,22 @@ export function createRoot(container) {
   // 3. 注册到 roots: roots.set(container, root)
   //
   // 4. 返回 root
+  if(roots.has(container)){
+    return roots.get(container)
+  }
+  const root = {
+    container,
+    currentVNode: null,
+    render(nextVNode){
+      reconcile(this.container, this.currentVNode, nextVNode)
+      this.currentVNode = nextVNode
+    },
+    unmount(){
+      reconcile(this.container, this.currentVNode, null)
+      this.currentVNode = null
+      roots.delete(this.container)
+    }
+  }
+  roots.set(container, root)
+  return root
 }

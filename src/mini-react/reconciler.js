@@ -67,6 +67,31 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
   // - 如果是普通元素：
   //   - 调用 updateProps(dom, oldProps, newProps) 更新属性
   //   - 调用 reconcileChildren(dom, oldChildren, newChildren) 递归协调子节点
+  if(oldVNode == null){
+    if(newVNode == null) return
+    const dom = mountVNode(newVNode)
+    parentDom.appendChild(dom)
+  }else 
+  if(newVNode == null){
+    const dom = oldVNode.__dom
+    parentDom.removeChild(dom)
+  }else
+  if(oldVNode.type !== newVNode.type){
+    const dom = mountVNode(newVNode)
+    parentDom.replaceChild(dom, oldVNode.__dom)
+  }else
+  if(oldVNode.type === newVNode.type){
+    if(oldVNode.type === TEXT_ELEMENT){
+      newVNode.__dom = oldVNode.__dom
+      if(oldVNode.props.nodeValue !== newVNode.props.nodeValue){
+        oldVNode.__dom.nodeValue = newVNode.props.nodeValue
+      }
+    }else{
+      newVNode.__dom = oldVNode.__dom
+      updateProps(newVNode.__dom, oldVNode.props, newVNode.props)
+      reconcileChildren(newVNode.__dom, oldVNode.props.children, newVNode.props.children)
+    }
+  }
 }
 
 // ─── 挂载（递归创建 DOM） ─────────────────────────────────────
@@ -88,6 +113,15 @@ function mountVNode(vnode) {
   //    - 对每个 child 调用 mountVNode(child)
   //    - 将返回的 childDom 用 dom.appendChild(childDom) 挂上去
   // 4. 返回 dom
+  const dom = createDom(vnode)
+  vnode.__dom = dom
+  if (vnode.props.children) {
+    vnode.props.children.forEach(child => {
+      const childDom = mountVNode(child)
+      dom.appendChild(childDom)
+    })
+  }
+  return dom
 }
 
 // ─── 子节点协调 ─────────────────────────────────────────────
@@ -107,6 +141,12 @@ function reconcileChildren(parentDom, oldChildren = [], newChildren = []) {
   // - 检查 newChildren 或 oldChildren 中是否有节点带 key（props.key != null）
   // - 如果有 key → 调用 reconcileKeyedChildren
   // - 如果没有 key → 调用 reconcileUnkeyedChildren
+  const hasKey = newChildren.some(child => child.props?.key != null) || oldChildren.some(child => child.props?.key != null)
+  if(hasKey){
+    reconcileKeyedChildren(parentDom, oldChildren, newChildren)
+  }else{
+    reconcileUnkeyedChildren(parentDom, oldChildren, newChildren)
+  }
 }
 
 // ─── 无 key 的位置对齐 Diff ──────────────────────────────────
@@ -133,6 +173,10 @@ function reconcileUnkeyedChildren(parentDom, oldChildren, newChildren) {
   // - 多出来的 newChildren → 被当作新增（oldChildren[i] 为 null）
   // - 多出来的 oldChildren → 被当作删除（newChildren[i] 为 null）
   // - 位置相同的节点 → 进入 reconcile 的类型比较逻辑
+  const maxLen = Math.max(oldChildren.length, newChildren.length)
+  for (let i = 0; i < maxLen; i++) {
+    reconcile(parentDom, oldChildren[i] ?? null, newChildren[i] ?? null, i)
+  }
 }
 
 // ─── 有 key 的子节点 Diff ───────────────────────────────────
@@ -173,4 +217,34 @@ function reconcileKeyedChildren(parentDom, oldChildren, newChildren) {
   // 3. 清理未被匹配的旧节点
   //    - oldKeyed 中剩余的 → 全部 reconcile(parentDom, staleChild, null) 删除
   //    - oldUnkeyed 中从 unkeyedIndex 开始的 → 全部删除
+  const oldKeyed = new Map()
+  const oldUnkeyed = []
+  oldChildren.forEach(child => {
+    if (child.props?.key != null) {
+      oldKeyed.set(child.props.key, child)
+    } else {
+      oldUnkeyed.push(child)
+    }
+  })
+  let unkeyedIndex = 0
+  newChildren.forEach(newChild => {
+    let matchedOld
+    if (newChild.props?.key != null) {
+      matchedOld = oldKeyed.get(newChild.props.key)
+      if (matchedOld) {
+        oldKeyed.delete(newChild.props.key)
+      }
+    } else {
+      matchedOld = oldUnkeyed[unkeyedIndex]
+      unkeyedIndex++
+    }
+    reconcile(parentDom, matchedOld ?? null, newChild, 0)
+    parentDom.appendChild(newChild.__dom)
+  })
+  oldKeyed.forEach(staleChild => {
+    reconcile(parentDom, staleChild, null, 0)
+  })
+  for (let i = unkeyedIndex; i < oldUnkeyed.length; i++) {
+    reconcile(parentDom, oldUnkeyed[i], null, 0)
+  }
 }
