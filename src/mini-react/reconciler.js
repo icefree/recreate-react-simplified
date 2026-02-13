@@ -18,6 +18,10 @@
  *     ├─ 类型变化 → replaceChild
  *     └─ 类型相同 → updateProps + reconcileChildren
  *
+ * 💡 关键设计：
+ *   每个 VNode 在挂载后会被标记 __dom 属性，指向对应的真实 DOM 节点。
+ *   下次 reconcile 时，通过 oldVNode.__dom 找到需要更新/替换/删除的 DOM。
+ *
  * ============================================================
  */
 
@@ -38,49 +42,31 @@ import { createDom, updateProps } from './render.js'
  * @param {number}      [index]   - 在父节点 children 中的位置索引
  */
 export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
-  // ── Case 1: 旧节点不存在 → 新增 ──
-  if (oldVNode == null) {
-    if (newVNode == null) return
-    const dom = mountVNode(newVNode)
-    parentDom.appendChild(dom)
-    return
-  }
-
-  // ── Case 2: 新节点不存在 → 删除 ──
-  if (newVNode == null) {
-    const dom = oldVNode.__dom
-    if (dom && dom.parentNode) {
-      dom.parentNode.removeChild(dom)
-    }
-    return
-  }
-
-  // ── Case 3: 类型不同 → 替换 ──
-  if (oldVNode.type !== newVNode.type) {
-    const newDom = mountVNode(newVNode)
-    const oldDom = oldVNode.__dom
-    if (oldDom && oldDom.parentNode) {
-      oldDom.parentNode.replaceChild(newDom, oldDom)
-    } else {
-      parentDom.appendChild(newDom)
-    }
-    return
-  }
-
+  // TODO: 实现协调逻辑
+  //
+  // 需要处理 4 种情况（按顺序判断）：
+  //
+  // ── Case 1: oldVNode 不存在 → 新增节点 ──
+  // - 如果 newVNode 也不存在，直接 return
+  // - 用 mountVNode(newVNode) 递归创建整棵 DOM 子树
+  // - 用 parentDom.appendChild(dom) 挂载
+  //
+  // ── Case 2: newVNode 不存在 → 删除节点 ──
+  // - 通过 oldVNode.__dom 拿到真实 DOM
+  // - 用 parentNode.removeChild(dom) 移除
+  //
+  // ── Case 3: oldVNode.type !== newVNode.type → 替换节点 ──
+  // - 用 mountVNode(newVNode) 创建新 DOM
+  // - 通过 oldVNode.__dom 拿到旧 DOM
+  // - 用 parentNode.replaceChild(newDom, oldDom) 替换
+  // - 如果旧 DOM 不存在（边界情况），降级为 appendChild
+  //
   // ── Case 4: 类型相同 → 原地更新 ──
-  const dom = oldVNode.__dom
-  newVNode.__dom = dom
-
-  if (newVNode.type === TEXT_ELEMENT) {
-    // 文本节点：直接比对 nodeValue
-    if (oldVNode.props.nodeValue !== newVNode.props.nodeValue) {
-      dom.nodeValue = newVNode.props.nodeValue
-    }
-  } else {
-    // 元素节点：更新属性 + 递归协调子节点
-    updateProps(dom, oldVNode.props, newVNode.props)
-    reconcileChildren(dom, oldVNode.props.children, newVNode.props.children)
-  }
+  // - 复用旧 DOM：newVNode.__dom = oldVNode.__dom
+  // - 如果是 TEXT_ELEMENT：比对 nodeValue，不同则更新
+  // - 如果是普通元素：
+  //   - 调用 updateProps(dom, oldProps, newProps) 更新属性
+  //   - 调用 reconcileChildren(dom, oldChildren, newChildren) 递归协调子节点
 }
 
 // ─── 挂载（递归创建 DOM） ─────────────────────────────────────
@@ -93,17 +79,15 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
  * @returns {HTMLElement|Text}
  */
 function mountVNode(vnode) {
-  const dom = createDom(vnode)
-  vnode.__dom = dom
-
-  if (vnode.type !== TEXT_ELEMENT && vnode.props.children) {
-    vnode.props.children.forEach(child => {
-      const childDom = mountVNode(child)
-      dom.appendChild(childDom)
-    })
-  }
-
-  return dom
+  // TODO: 实现挂载逻辑
+  //
+  // 步骤：
+  // 1. 调用 createDom(vnode) 创建 DOM 节点
+  // 2. 将 DOM 节点记录到 vnode.__dom = dom
+  // 3. 如果不是文本节点（TEXT_ELEMENT），递归挂载所有 children
+  //    - 对每个 child 调用 mountVNode(child)
+  //    - 将返回的 childDom 用 dom.appendChild(childDom) 挂上去
+  // 4. 返回 dom
 }
 
 // ─── 子节点协调 ─────────────────────────────────────────────
@@ -117,14 +101,12 @@ function mountVNode(vnode) {
  * @param {Array} newChildren
  */
 function reconcileChildren(parentDom, oldChildren = [], newChildren = []) {
-  const hasKeys = newChildren.some(c => c?.props?.key != null)
-    || oldChildren.some(c => c?.props?.key != null)
-
-  if (hasKeys) {
-    reconcileKeyedChildren(parentDom, oldChildren, newChildren)
-  } else {
-    reconcileUnkeyedChildren(parentDom, oldChildren, newChildren)
-  }
+  // TODO: 实现子节点协调分发
+  //
+  // 判断逻辑：
+  // - 检查 newChildren 或 oldChildren 中是否有节点带 key（props.key != null）
+  // - 如果有 key → 调用 reconcileKeyedChildren
+  // - 如果没有 key → 调用 reconcileUnkeyedChildren
 }
 
 // ─── 无 key 的位置对齐 Diff ──────────────────────────────────
@@ -138,15 +120,19 @@ function reconcileChildren(parentDom, oldChildren = [], newChildren = []) {
  * @param {Array} newChildren
  */
 function reconcileUnkeyedChildren(parentDom, oldChildren, newChildren) {
-  const maxLen = Math.max(oldChildren.length, newChildren.length)
-  for (let i = 0; i < maxLen; i++) {
-    reconcile(
-      parentDom,
-      oldChildren[i] ?? null,
-      newChildren[i] ?? null,
-      i
-    )
-  }
+  // TODO: 实现无 key 的子节点协调
+  //
+  // 策略：按位置一一对应比较
+  //
+  // 步骤：
+  // 1. 取 maxLen = Math.max(oldChildren.length, newChildren.length)
+  // 2. 遍历 0..maxLen，对每个位置 i 递归调用：
+  //    reconcile(parentDom, oldChildren[i] ?? null, newChildren[i] ?? null, i)
+  //
+  // 这意味着：
+  // - 多出来的 newChildren → 被当作新增（oldChildren[i] 为 null）
+  // - 多出来的 oldChildren → 被当作删除（newChildren[i] 为 null）
+  // - 位置相同的节点 → 进入 reconcile 的类型比较逻辑
 }
 
 // ─── 有 key 的子节点 Diff ───────────────────────────────────
@@ -165,49 +151,26 @@ function reconcileUnkeyedChildren(parentDom, oldChildren, newChildren) {
  * @param {Array} newChildren
  */
 function reconcileKeyedChildren(parentDom, oldChildren, newChildren) {
-  // 1. 索引旧节点
-  const oldKeyed = new Map()
-  const oldUnkeyed = []
-
-  oldChildren.forEach(child => {
-    if (child?.props?.key != null) {
-      oldKeyed.set(child.props.key, child)
-    } else {
-      oldUnkeyed.push(child)
-    }
-  })
-
-  // 2. 遍历新节点，尝试匹配
-  let unkeyedIndex = 0
-  newChildren.forEach(newChild => {
-    let matchedOld = null
-
-    if (newChild?.props?.key != null) {
-      matchedOld = oldKeyed.get(newChild.props.key) ?? null
-      if (matchedOld) oldKeyed.delete(newChild.props.key)
-    } else {
-      matchedOld = oldUnkeyed[unkeyedIndex++] ?? null
-    }
-
-    if (matchedOld) {
-      // 匹配到旧节点 → 原地更新
-      reconcile(parentDom, matchedOld, newChild)
-      // 确保 DOM 顺序正确（可能因为 key 重排需要移动）
-      const dom = newChild.__dom
-      if (dom) {
-        parentDom.appendChild(dom) // appendChild 会自动移动已存在的节点
-      }
-    } else {
-      // 没有匹配 → 新增
-      reconcile(parentDom, null, newChild)
-    }
-  })
-
-  // 3. 清理旧节点中未被匹配的
-  oldKeyed.forEach(staleChild => {
-    reconcile(parentDom, staleChild, null)
-  })
-  for (let i = unkeyedIndex; i < oldUnkeyed.length; i++) {
-    reconcile(parentDom, oldUnkeyed[i], null)
-  }
+  // TODO: 实现 key 驱动的子节点协调
+  //
+  // 步骤：
+  //
+  // 1. 索引旧节点 — 分离有 key 和无 key 的
+  //    - const oldKeyed = new Map()   // key → vnode
+  //    - const oldUnkeyed = []         // 无 key 的节点数组
+  //    - 遍历 oldChildren，按 child.props.key 是否存在分类
+  //
+  // 2. 遍历 newChildren，尝试匹配旧节点
+  //    - let unkeyedIndex = 0
+  //    - 对每个 newChild：
+  //      - 如果有 key → 从 oldKeyed 中查找匹配，找到后从 Map 中删除
+  //      - 如果没有 key → 从 oldUnkeyed 中按顺序取
+  //      - 如果找到匹配 → reconcile(parentDom, matchedOld, newChild) 原地更新
+  //        然后用 parentDom.appendChild(newChild.__dom) 保证 DOM 顺序
+  //        （appendChild 对已存在的节点会自动移动位置）
+  //      - 如果没有匹配 → reconcile(parentDom, null, newChild) 新增
+  //
+  // 3. 清理未被匹配的旧节点
+  //    - oldKeyed 中剩余的 → 全部 reconcile(parentDom, staleChild, null) 删除
+  //    - oldUnkeyed 中从 unkeyedIndex 开始的 → 全部删除
 }

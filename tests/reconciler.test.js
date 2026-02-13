@@ -1,17 +1,15 @@
 /**
- * Phase 3 测试 — Reconciler
+ * Phase 3 测试 — Reconciliation
  *
  * 运行方式：pnpm test
  *
- * 验证协调器的核心能力：
- * - 新增节点
- * - 删除节点
- * - 替换节点（类型变化）
- * - 属性更新（新增/修改/删除）
+ * 这些测试验证 reconciler 的核心功能：
+ * - 新增/删除/替换节点
+ * - 属性更新（DOM 复用）
  * - 文本节点更新
  * - 子节点增减
  * - key 驱动的列表协调
- * - Root API（createRoot/render/unmount）
+ * - createRoot API
  *
  * @vitest-environment jsdom
  */
@@ -21,6 +19,8 @@ import { createElement } from '../src/mini-react/createElement.js'
 import { reconcile } from '../src/mini-react/reconciler.js'
 import { createRoot } from '../src/mini-react/root.js'
 
+// ─── reconcile 基本场景 ──────────────────────────────────────
+
 describe('reconcile', () => {
   let container
 
@@ -28,38 +28,32 @@ describe('reconcile', () => {
     container = document.createElement('div')
   })
 
-  // ─── 新增 ─────────────────────────────────────────────────
+  // ─── 新增节点 ─────────────────────────────────────────────
 
-  it('oldVNode 为 null 时应创建并挂载新 DOM', () => {
+  it('oldVNode 为 null 时应创建新节点', () => {
     const vnode = createElement('p', null, 'Hello')
     reconcile(container, null, vnode)
 
     expect(container.innerHTML).toBe('<p>Hello</p>')
   })
 
-  it('新增嵌套结构应正确挂载', () => {
-    const vnode = createElement(
-      'div',
-      { id: 'wrap' },
-      createElement('span', null, 'inner')
-    )
-    reconcile(container, null, vnode)
-
-    expect(container.querySelector('#wrap span').textContent).toBe('inner')
-  })
-
-  // ─── 删除 ─────────────────────────────────────────────────
-
-  it('newVNode 为 null 时应删除旧 DOM', () => {
-    const vnode = createElement('p', null, 'Bye')
-    reconcile(container, null, vnode)
-    expect(container.childNodes.length).toBe(1)
-
-    reconcile(container, vnode, null)
+  it('两个都为 null 时不应报错', () => {
+    expect(() => reconcile(container, null, null)).not.toThrow()
     expect(container.childNodes.length).toBe(0)
   })
 
-  // ─── 替换（类型变化） ─────────────────────────────────────
+  // ─── 删除节点 ─────────────────────────────────────────────
+
+  it('newVNode 为 null 时应删除旧节点', () => {
+    const old = createElement('div', null, 'content')
+    reconcile(container, null, old)
+    expect(container.childNodes.length).toBe(1)
+
+    reconcile(container, old, null)
+    expect(container.childNodes.length).toBe(0)
+  })
+
+  // ─── 类型替换 ─────────────────────────────────────────────
 
   it('类型不同时应替换节点', () => {
     const old = createElement('p', null, 'old')
