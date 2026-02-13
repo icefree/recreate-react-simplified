@@ -39,9 +39,13 @@ export const TEXT_ELEMENT = 'TEXT_ELEMENT'
  *   → { type: 'TEXT_ELEMENT', props: { nodeValue: 'Hello', children: [] } }
  */
 export function createTextElement(text) {
-  // TODO: 实现这个函数
-  // 提示：返回一个 type 为 TEXT_ELEMENT 的 VNode
-  // props 中包含 nodeValue（文本内容）和空的 children 数组
+  return {
+    type: TEXT_ELEMENT,
+    props: {
+      nodeValue: text,
+      children: []
+    }
+  }
 }
 
 /**
@@ -75,5 +79,20 @@ export function createElement(type, props, ...children) {
   //    - 把 string 和 number 类型的 child 包装为 createTextElement(child)
   //    - 其他类型（VNode 对象）保持原样
   // 2. 返回 VNode 对象：{ type, props: { ...props, children: 处理后的children } }
-  //    - 注意：props 可能是 null，要处理这种情况
+  //    - 注意：props 可能是 null，要处理这种情况 
+  return {
+    type,
+    props: {
+      ...props,
+      children: children.map(child => {
+        if(child === null || child === undefined || child === false || child === true) {
+          return null
+        }
+        if(typeof child === 'string' || typeof child === 'number') {
+          return createTextElement(child)
+        }
+        return child
+      }).filter(child => child !== null)
+    }
+  }
 }

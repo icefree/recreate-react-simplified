@@ -57,6 +57,15 @@ export function render(vnode, container) {
   //
   // 4. 挂载到容器
   //    - container.appendChild(dom)
+  let dom
+  if(vnode.type === TEXT_ELEMENT) {
+      dom = document.createTextNode(vnode.props.nodeValue)
+  }else{
+      dom = document.createElement(vnode.type)
+  }
+  updateProps(dom, vnode.props) 
+  vnode.props.children.forEach(child => render(child, dom))
+  container.appendChild(dom)
 }
 
 /**
@@ -86,4 +95,16 @@ function updateProps(dom, props) {
   //
   // 💡 提示：你也可以用 dom[key] = value 来设置属性，
   //    但 setAttribute 更通用，两种方式各有优劣，可以先用一种
+  Object.keys(props).forEach(key => {
+    if(key === 'children') return
+    if(key === 'className') {
+        dom.className = props[key]
+    }else if(key === 'style') {
+        Object.assign(dom.style, props[key])
+    }else if(key.startsWith('on')) {
+        dom.addEventListener(key.slice(2).toLowerCase(), props[key])
+    }else{
+        dom[key] = props[key]
+    }
+  })  
 }

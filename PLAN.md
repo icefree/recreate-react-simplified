@@ -35,11 +35,13 @@ recreate-react-simplified/
 │   ├── mini-react/              # 🔧 核心库（逐阶段构建）
 │   │   ├── createElement.js     # Phase 1: 创建虚拟 DOM
 │   │   ├── render.js            # Phase 1: 渲染到真实 DOM
+│   │   ├── root.js              # Phase 3: Root API（createRoot/render/unmount）
 │   │   ├── reconciler.js        # Phase 3: Diff & Patch
 │   │   ├── component.js         # Phase 4: 函数式组件支持
 │   │   ├── hooks.js             # Phase 5-6: useState & useEffect
 │   │   ├── events.js            # Phase 7: 事件系统
 │   │   ├── fiber.js             # Phase 8: Fiber 架构
+│   │   ├── scheduler.js         # Phase 11: 调度器
 │   │   └── index.js             # 统一导出
 │   ├── playground/              # 🎮 每个阶段的演示应用
 │   │   ├── phase1.js
@@ -49,7 +51,10 @@ recreate-react-simplified/
 │   │   ├── phase5.jsx
 │   │   ├── phase6.jsx
 │   │   ├── phase7.jsx
-│   │   └── phase8.jsx
+│   │   ├── phase8.jsx
+│   │   ├── phase9.jsx
+│   │   ├── phase10.jsx
+│   │   └── phase11.jsx
 │   └── main.jsx                 # 入口文件
 ├── tests/                       # 🧪 单元测试
 │   ├── createElement.test.js
@@ -215,18 +220,48 @@ React 的 Diff 策略基于三个假设：
 
 ### 📋 实现任务
 
-#### 3.1 改造 `render` 函数
+#### 3.0 引入 Root 生命周期 API（支持多 root）
 
 ```js
-// 之前：每次 render 都是全量创建
-// 之后：保存上一次的 VNode，进行 Diff
+const roots = new WeakMap();
 
-let prevVNode = null;
+export function createRoot(container) {
+  if (roots.has(container)) return roots.get(container);
 
-function render(vnode, container) {
-  reconcile(container, prevVNode, vnode);
-  prevVNode = vnode;
+  const root = {
+    container,
+    currentVNode: null,
+    render(nextVNode) {
+      reconcile(container, root.currentVNode, nextVNode);
+      root.currentVNode = nextVNode;
+    },
+    unmount() {
+      reconcile(container, root.currentVNode, null);
+      root.currentVNode = null;
+      roots.delete(container);
+    },
+  };
+
+  roots.set(container, root);
+  return root;
 }
+```
+
+**要点：**
+
+- 不再使用全局 `prevVNode`，每个 root 独立保存 `currentVNode`
+- 支持同页面多个容器并行渲染
+- `unmount()` 负责触发卸载流程（DOM 移除 + 组件 cleanup）
+
+#### 3.1 改造入口渲染调用
+
+```js
+const root = createRoot(document.getElementById("root"));
+root.render(<App />);
+// 后续更新
+root.render(<App mode="next" />);
+// 卸载
+root.unmount();
 ```
 
 #### 3.2 实现 `reconcile(parentDom, oldVNode, newVNode)`
@@ -251,7 +286,7 @@ function updateProps(dom, oldProps, newProps) {
 }
 ```
 
-#### 3.4 实现子节点协调（简化版，暂不含 key）
+#### 3.4 实现子节点协调（位置对齐版本，无 key）
 
 ```js
 function reconcileChildren(parentDom, oldChildren, newChildren) {
@@ -262,11 +297,47 @@ function reconcileChildren(parentDom, oldChildren, newChildren) {
 }
 ```
 
+#### 3.5 实现 `key` 驱动的子节点协调（列表重排核心）
+
+```js
+function reconcileKeyedChildren(parentDom, oldChildren, newChildren) {
+  const oldKeyed = new Map();
+  const oldUnkeyed = [];
+
+  oldChildren.forEach((child) => {
+    if (child?.key != null) oldKeyed.set(child.key, child);
+    else oldUnkeyed.push(child);
+  });
+
+  let unkeyedIndex = 0;
+  newChildren.forEach((newChild) => {
+    const matchedOld =
+      newChild?.key != null ? oldKeyed.get(newChild.key) : oldUnkeyed[unkeyedIndex++];
+    reconcile(parentDom, matchedOld, newChild);
+    if (newChild?.key != null) oldKeyed.delete(newChild.key);
+  });
+
+  // newChildren 中不存在的旧节点全部删除
+  oldKeyed.forEach((staleChild) => reconcile(parentDom, staleChild, null));
+  for (let i = unkeyedIndex; i < oldUnkeyed.length; i++) {
+    reconcile(parentDom, oldUnkeyed[i], null);
+  }
+}
+```
+
+**要点：**
+
+- `key` 仅在同一层级 sibling 范围内生效
+- 缺失 `key` 的列表项只能退化为“按位置比较”，会导致状态错位风险
+- 将“插入/删除/移动”统一落到 effect（`PLACEMENT`/`DELETION`/`MOVE`）或 DOM patch 流程中
+
 ### ✅ 验证标准
 
 - [ ] 修改属性时只更新变化的 prop，不重建 DOM
 - [ ] 添加/删除子节点正确
 - [ ] 节点类型变化时正确替换
+- [ ] 多个 root 互不影响，分别 `render`/`unmount` 正确
+- [ ] 列表在 `key` 稳定时可正确复用节点，重排不丢状态
 - [ ] 写一个 Demo：点按钮切换不同 VNode 树，观察 DOM 更新（用 DevTools 验证）
 
 ### 🔗 React 源码参考
@@ -382,38 +453,53 @@ let hookIndex = 0; // 当前 hook 索引
 
 ```js
 function useState(initialValue) {
-  const component = currentComponent;
-  const idx = hookIndex++;
-
-  // 首次渲染：初始化
-  if (component.__hooks[idx] === undefined) {
-    component.__hooks[idx] = initialValue;
+  if (!currentComponent) {
+    throw new Error("useState must be called inside a function component");
   }
 
-  // setState：更新值 + 触发重新渲染
-  const setState = (newValue) => {
-    // 支持函数式更新
-    if (typeof newValue === "function") {
-      component.__hooks[idx] = newValue(component.__hooks[idx]);
-    } else {
-      component.__hooks[idx] = newValue;
-    }
-    // 触发重新渲染
+  const component = currentComponent;
+  const idx = hookIndex++;
+  const oldHook = component.__hooks[idx];
+
+  const hook = oldHook ?? {
+    state: typeof initialValue === "function" ? initialValue() : initialValue,
+    queue: [],
+  };
+
+  // 按顺序消费更新队列，保证 setState 顺序语义
+  hook.queue.forEach((action) => {
+    hook.state = typeof action === "function" ? action(hook.state) : action;
+  });
+  hook.queue = [];
+  component.__hooks[idx] = hook;
+
+  const setState = (action) => {
+    hook.queue.push(action);
     scheduleRerender(component);
   };
 
-  return [component.__hooks[idx], setState];
+  return [hook.state, setState];
 }
 ```
 
 #### 5.3 实现重新渲染机制
 
 ```js
+const dirtyComponents = new Set();
+let flushScheduled = false;
+
 function scheduleRerender(component) {
-  // 使用 requestAnimationFrame 或 queueMicrotask 批处理更新
-  queueMicrotask(() => {
-    renderComponent(component);
-  });
+  dirtyComponents.add(component);
+  if (flushScheduled) return;
+  flushScheduled = true;
+  queueMicrotask(flushUpdates);
+}
+
+function flushUpdates() {
+  flushScheduled = false;
+  const pending = Array.from(dirtyComponents);
+  dirtyComponents.clear();
+  pending.forEach(renderComponent);
 }
 ```
 
@@ -433,9 +519,46 @@ function renderComponent(component) {
   component.__prevVNode = newVNode;
 
   // 4. 清理上下文
+  if (component.__expectedHookCount == null) {
+    component.__expectedHookCount = hookIndex;
+  } else if (component.__expectedHookCount !== hookIndex) {
+    throw new Error("Hook call order changed between renders");
+  }
   currentComponent = null;
 }
 ```
+
+#### 5.5 定义状态更新语义（避免实现歧义）
+
+```js
+// 语义约定（建议写进测试）
+// 1) 同一 microtask 内，同一组件只触发一次 render（批处理）
+// 2) 同一个 state hook 的更新按 enqueue 顺序依次执行
+// 3) 函数式更新总是接收前一个更新后的最新值
+// 4) 若最终值与旧值 Object.is 相等，可跳过 commit
+```
+
+**需要明确的边界：**
+
+- 在 render 期间调用 `setState`：简化版直接抛错，避免无限递归
+- 跨组件更新顺序：按 `scheduleRerender` 入队顺序执行
+
+#### 5.6 Hook 规则与错误处理
+
+```js
+function assertHookContext(hookName) {
+  if (!currentComponent) {
+    throw new Error(`${hookName} must be called at the top level of a component`);
+  }
+}
+```
+
+**运行时规则：**
+
+- Hook 只能在函数组件顶层调用（禁止在条件、循环、嵌套函数中调用）
+- 每次渲染 Hook 调用数量必须一致，不一致立即抛错
+- 组件外调用 Hook 必须抛出可读错误信息
+- 无效 `setState` 入参（如 Promise）可以在开发模式给出警告
 
 ### ✅ 验证标准
 
@@ -443,6 +566,8 @@ function renderComponent(component) {
 - [ ] `setState` 触发组件重新渲染
 - [ ] 函数式更新 `setState(prev => prev + 1)` 正确工作
 - [ ] 多个 `useState` 在同一组件中正确独立工作
+- [ ] 同一事件里多次 `setState` 被批处理，且顺序一致
+- [ ] Hook 调用顺序变化、组件外调用 Hook 时会抛出明确错误
 - [ ] Demo 1：计数器（Counter）
 - [ ] Demo 2：Todo List（添加/删除）
 
@@ -513,12 +638,33 @@ function unmountComponent(component) {
 }
 ```
 
+#### 6.3 Hook 参数校验与错误处理
+
+```js
+function useEffect(callback, deps) {
+  if (typeof callback !== "function") {
+    throw new Error("useEffect callback must be a function");
+  }
+  if (deps !== undefined && !Array.isArray(deps)) {
+    throw new Error("useEffect deps must be an array or undefined");
+  }
+
+  // 原有 useEffect 逻辑...
+}
+```
+
+**要点：**
+
+- cleanup 返回值只允许是 `function` 或 `undefined`
+- 开发模式下为错误的 deps 类型和 cleanup 类型提供可读提示
+
 ### ✅ 验证标准
 
 - [ ] 空依赖 `useEffect(() => {}, [])` 只在挂载时执行一次
 - [ ] 无依赖 `useEffect(() => {})` 每次渲染后都执行
 - [ ] 依赖变化时正确触发
 - [ ] cleanup 函数正确执行
+- [ ] 非法 deps 类型、非法 cleanup 返回值能被识别并报错
 - [ ] Demo 1：自动计时器（setInterval + cleanup）
 - [ ] Demo 2：模拟数据请求（切换 ID 时取消上次请求）
 
@@ -741,28 +887,221 @@ function commitWork(fiber) {
 
 ---
 
+## Phase 9：Fiber 架构深入 — 源码级理解
+
+### 🎯 学习目标
+
+不仅仅是实现 Fiber，而是深入理解 React 源码中的核心机制。
+掌握 **双缓存**、**两大工作循环** 以及 **Fiber 节点的高级数据结构**。
+
+### 📚 核心概念
+
+#### 1. 双缓存机制 (Double Buffering)
+
+React 在内存中同时维护两棵 Fiber 树：
+
+- **Current Tree**：当前屏幕上显示的内容对应的 Fiber 树。
+- **WorkInProgress Tree**：正在构建的、用于下一次渲染的 Fiber 树。
+
+两者通过 `alternate` 指针相互连接。渲染完成后，WIP 树变成 Current 树（指针交换），这一步非常快。
+
+#### 2. 两大工作阶段 (The Two Phases)
+
+- **Render Phase (Reconcile)**:
+  - 纯计算，无副作用（不操作 DOM）。
+  - 可中断、可重复执行。
+  - 此阶段会构建 WIP 树，打上 `flags` (副作用标记)。
+  - 核心函数：`beginWork` (向下遍历), `completeWork` (向上回溯)。
+- **Commit Phase**:
+  - 操作 DOM，执行副作用（`useEffect`）。
+  - 不可中断，必须一气呵成。
+  - 核心函数：`commitRoot` (分为 `BeforeMutation`, `Mutation`, `Layout` 三个子阶段)。
+
+### 📋 实现任务
+
+#### 9.1 完善 Fiber 数据结构
+
+```js
+function createFiber(vnode, parent) {
+  return {
+    // ...原有属性
+    tag: FunctionComponent, // 标记组件类型 (Function/Class/Host)
+    key: null,
+    stateNode: null, // 对应的真实 DOM 或类实例
+    updateQueue: null, // 状态更新队列
+    memoizedState: null, // Hook 状态链表
+    flags: NoFlags, // 副作用标记 (Placement, Update, etc.)
+    subtreeFlags: NoFlags, // 子树副作用标记 (优化遍历)
+    alternate: null, // 双缓存连接
+  };
+}
+```
+
+#### 9.2 实现 beginWork 与 completeWork 流程
+
+将 `performUnitOfWork` 拆解为更符合源码的结构。
+
+### ✅ 验证标准
+
+- [ ] 能够解释双缓存是如何工作的
+- [ ] 清楚区分 Render 阶段和 Commit 阶段的职责
+- [ ] 实现 `alternate` 机制，复用旧 Fiber 节点
+
+---
+
+## Phase 10：三层架构 — React, Reconciler, Renderer
+
+### 🎯 学习目标
+
+理解 React 的**分层架构**，明白为什么 React 可以跨平台（Reflex/Native/Three.js）。
+
+### 📚 核心概念
+
+1.  **React (API Layer)**
+    - 提供 `createElement`, `useState`, `useEffect`, `Component` 等 API。
+    - **不包含**任何渲染逻辑，只负责定义组件和数据。
+    - 包名：`react`。
+
+2.  **Reconciler (Core Engine)**
+    - 核心 Diff 算法和 Fiber 调度器。
+    - 消费 React Element，计算差异，产生副作用。
+    - **平台无关**，不直接操作 DOM。
+    - 包名：`react-reconciler`。
+
+3.  **Renderer (Platform Layer)**
+    - 负责将 Reconciler 的指令应用到具体平台（DOM, iOS, Android, Canvas）。
+    - 实现 `HostConfig` 接口（如 `createElement`, `appendChild`, `commitTextUpdate`）。
+    - 包名：`react-dom`, `react-native` 等。
+
+### 📋 实现任务
+
+#### 10.1 抽离 HostConfig
+
+将所有 DOM 操作抽离到一个单独的配置文件或对象中。
+
+```js
+// hostConfig.js
+export const hostConfig = {
+  createInstance: (type, props) => document.createElement(type),
+  createTextInstance: (text) => document.createTextNode(text),
+  appendChild: (parent, child) => parent.appendChild(child),
+  removeChild: (parent, child) => parent.removeChild(child),
+  // ...
+};
+```
+
+#### 10.2 改造 Reconciler
+
+让 Reconciler 依赖 `hostConfig` 而不是直接调用 `document.xxx`。
+
+### ✅ 验证标准
+
+- [ ] 代码结构清晰分离：UI 定义 vs 协调逻辑 vs 平台操作
+- [ ] 尝试写一个简单的 Custom Renderer（例如渲染到 JSON 或 Canvas）
+
+---
+
+## Phase 11：Concurrent Mode (并发模式)
+
+### 🎯 学习目标
+
+实现 React 最先进的特性：**时间切片 (Time Slicing)** 和 **优先级调度 (Scheduler)**。
+让高优先级任务（如用户输入）打断低优先级任务（如大数据渲染）。
+
+### 📚 核心概念
+
+1.  **Scheduler (调度器)**
+    - 独立于 React 的任务调度包。
+    - 核心：`shouldYield()` (控制权交还浏览器) 和 `scheduleCallback()` (按优先级调度任务)。
+    - 使用 `MessageChannel` 实现宏任务调度（比 `requestIdleCallback` 更稳定）。
+
+2.  **Update Priority (优先级)**
+    - `UserBlocking` (最高): 点击、输入
+    - `Normal`: 数据获取
+    - `Low`: 统计上报
+    - `Idle`: 后台任务
+
+3.  **Lane 模型**
+    - 使用二进制位掩码表示优先级（代替 expireTime）。
+
+### 📋 实现任务
+
+#### 11.1 集成 Scheduler
+
+实现一个简易版 Scheduler。
+
+```js
+// scheduler.js
+const taskQueue = [];
+let deadline = 0;
+let yieldInterval = 5; // 5ms 时间切片
+
+function shouldYield() {
+  return navigator.scheduling.isInputPending() || performance.now() >= deadline;
+}
+
+function schedule(callback) {
+  taskQueue.push(callback);
+  postMessage(); // 触发宏任务
+}
+```
+
+#### 11.2 实现 `useTransition`
+
+```js
+function useTransition() {
+  const [isPending, setPending] = useState(false);
+  const startTransition = (callback) => {
+    setPending(true);
+    // 降低优先级执行 callback 中的更新
+    scheduler.scheduleLowPriority(() => {
+      callback();
+      setPending(false);
+    });
+  };
+  return [isPending, startTransition];
+}
+```
+
+### ✅ 验证标准
+
+- [ ] 能够在渲染重计算任务时响应用户点击
+- [ ] 实现 `startTransition`
+- [ ] 演示 Time Slicing 效果
+
+---
+
 ## 实施路线图
 
 ```
-Phase 1 ─── Phase 2 ─── Phase 3 ─── Phase 4 ─── Phase 5 ─── Phase 6 ─── Phase 7 ─── Phase 8
-VNode        JSX        Diffing    Components   useState   useEffect    Events      Fiber
-(基石)      (语法)      (性能)      (抽象)       (状态)      (副作用)     (交互)     (架构)
- ↑                                                                                    ↑
- 必做                                                                               可选/进阶
+Phase 1 ── Phase 2 ── Phase 3 ── Phase 4 ── Phase 5 ── Phase 6 ── Phase 7 ── Phase 8
+VNode       JSX       Diffing    Component   useState   useEffect    Events     Fiber
+(基石)     (语法)     (性能)      (抽象)      (状态)     (副作用)     (交互)     (基础)
+
+   ┌──────────────────────────────────────────────────────────────────────────────┘
+   ↓
+Phase 9 ──── Phase 10 ──── Phase 11
+DeepFiber    ThreeLayer    Concurrent
+(原理)        (分层)        (并发)
+   ↑             ↑             ↑
+  进阶          架构          挑战
 ```
 
 ### 预计时间
 
-| 阶段    | 预计耗时 | 难度       |
-| ------- | -------- | ---------- |
-| Phase 1 | 1-2 小时 | ⭐⭐       |
-| Phase 2 | 30 分钟  | ⭐         |
-| Phase 3 | 2-3 小时 | ⭐⭐⭐     |
-| Phase 4 | 1-2 小时 | ⭐⭐       |
-| Phase 5 | 2-3 小时 | ⭐⭐⭐⭐   |
-| Phase 6 | 1-2 小时 | ⭐⭐⭐     |
-| Phase 7 | 1-2 小时 | ⭐⭐       |
-| Phase 8 | 3-4 小时 | ⭐⭐⭐⭐⭐ |
+| 阶段     | 预计耗时 | 难度       |
+| -------- | -------- | ---------- |
+| Phase 1  | 1-2 小时 | ⭐⭐       |
+| Phase 2  | 30 分钟  | ⭐         |
+| Phase 3  | 2-3 小时 | ⭐⭐⭐     |
+| Phase 4  | 1-2 小时 | ⭐⭐       |
+| Phase 5  | 2-3 小时 | ⭐⭐⭐⭐   |
+| Phase 6  | 1-2 小时 | ⭐⭐⭐     |
+| Phase 7  | 1-2 小时 | ⭐⭐       |
+| Phase 8  | 3-4 小时 | ⭐⭐⭐⭐⭐ |
+| Phase 9  | 2-3 小时 | ⭐⭐⭐⭐   |
+| Phase 10 | 2-3 小时 | ⭐⭐⭐     |
+| Phase 11 | 4-5 小时 | ⭐⭐⭐⭐⭐ |
 
 ### 每个阶段的工作流程
 
