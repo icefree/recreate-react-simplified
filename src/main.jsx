@@ -1,11 +1,11 @@
 /**
- * Phase 5 Playground — useState Hook
+ * Phase 6 Playground — useEffect / useRef / useReducer
  *
- * 🎯 目标：验证 useState 的核心能力
+ * 🎯 目标：验证副作用管理、持久化引用、复杂状态管理
  *
- * 入口文件直接引入 phase5 playground，
+ * 入口文件直接引入 phase6 playground，
  * 历史阶段代码保留在 playground 目录中。
  */
 
-// Phase 5: useState Hook
-import "./playground/phase5.jsx";
+// Phase 6: useEffect / useRef / useReducer
+import "./playground/phase6.jsx";

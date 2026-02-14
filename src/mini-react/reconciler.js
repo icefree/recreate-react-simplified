@@ -30,7 +30,7 @@
 import { TEXT_ELEMENT } from './createElement.js'
 import { createDom, updateProps } from './render.js'
 import { isComponent, getComponentDom } from './component.js'
-import { setCurrentComponent, clearCurrentComponent } from './hooks.js'
+import { setCurrentComponent, clearCurrentComponent, unmountComponent } from './hooks.js'
 
 // ─── 主入口 ───────────────────────────────────────────────────
 
@@ -102,9 +102,19 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     //
     // 同时保存 __parentDom，供 setState 触发重渲染时定位父 DOM：
     //   newVNode.__parentDom = parentDom
+    if(isComponent(oldVNode) && oldVNode.type === newVNode.type){
+      newVNode.__hooks = oldVNode.__hooks
+    }
 
-    const childVNode = newVNode.type(newVNode.props)
+    setCurrentComponent(newVNode)
+    newVNode.__parentDom = parentDom
 
+    let childVNode
+    try {
+      childVNode = newVNode.type(newVNode.props)
+    } finally {
+      clearCurrentComponent()
+    }
     // TODO (Phase 5): 清除 Hook 上下文
     //
     // 组件函数执行完毕后，清除上下文：
@@ -120,6 +130,8 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
   }
 
   if (isComponent(oldVNode)) {
+    // Phase 6: 组件被替换为非组件时，先清理 effects
+    unmountComponent(oldVNode)
     oldVNode = oldVNode.__childVNode
   }
 
@@ -131,10 +143,14 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     parentDom.appendChild(dom)
   }else
   if(newVNode == null){
+    // Phase 6: 组件卸载时执行 cleanup
+    unmountVNode(oldVNode)
     const dom = oldVNode.__dom
     parentDom.removeChild(dom)
   }else
   if(oldVNode.type !== newVNode.type){
+    // Phase 6: 类型变化时也需要清理旧组件的 effects
+    unmountVNode(oldVNode)
     const dom = mountVNode(newVNode)
     parentDom.replaceChild(dom, oldVNode.__dom)
   }else
@@ -149,6 +165,28 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
       updateProps(newVNode.__dom, oldVNode.props, newVNode.props)
       reconcileChildren(newVNode.__dom, oldVNode.props.children, newVNode.props.children)
     }
+  }
+}
+
+// ─── 卸载（递归清理 Effects） ─────────────────────────────────
+
+/**
+ * 递归卸载 VNode 树
+ * 确保所有组件的 useEffect cleanup 都被执行
+ *
+ * @param {Object} vnode - 要卸载的 VNode
+ */
+function unmountVNode(vnode) {
+  if (!vnode) return
+
+  if (isComponent(vnode)) {
+    // 执行组件自身的 effect cleanup
+    unmountComponent(vnode)
+    // 递归清理子 VNode
+    unmountVNode(vnode.__childVNode)
+  } else if (vnode.props?.children) {
+    // 原生元素，递归清理子节点
+    vnode.props.children.forEach(child => unmountVNode(child))
   }
 }
 
@@ -183,23 +221,14 @@ function mountVNode(vnode) {
   //
   // 否则走原有的原生元素挂载逻辑（下面已实现的代码）
   if(isComponent(vnode)){
-    // TODO (Phase 5): 设置 Hook 上下文（同 reconcile 中的逻辑）
-    //   setCurrentComponent(vnode)
-    //   vnode.__parentDom = ???
-    //
-    // 💡 mountVNode 没有 parentDom 参数，
-    //    但此时 __parentDom 的设置可以推迟到 reconcile 阶段。
-    //    reconcile 调用 mountVNode 之前已经有了 parentDom。
-    //    所以这里可以先不设置 __parentDom，
-    //    而是在 reconcile 的函数组件分支里设置。
-    //
-    //    不过仍然需要 setCurrentComponent/clearCurrentComponent，
-    //    这样嵌套在组件内的子组件也能正确注册 hooks。
+    setCurrentComponent(vnode)
 
-    const childVNode = vnode.type(vnode.props)
-
-    // TODO (Phase 5): 清除 Hook 上下文
-    //   clearCurrentComponent()
+    let childVNode
+    try {
+      childVNode = vnode.type(vnode.props)
+    } finally {
+      clearCurrentComponent()
+    }
 
     const dom = mountVNode(childVNode)
     vnode.__childVNode = childVNode

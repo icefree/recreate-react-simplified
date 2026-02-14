@@ -1,6 +1,6 @@
 /**
  * ============================================================
- * Mini-React: hooks — useState & 重新渲染调度
+ * Mini-React: hooks — useState / useEffect / useRef / useReducer
  * ============================================================
  *
  * 🎯 核心职责：
@@ -13,7 +13,7 @@
  *   不在组件函数内部！而在框架维护的"组件实例"对象上。
  *
  *   每个函数组件 VNode 在首次渲染时会被绑定一个 __hooks 数组。
- *   每调用一次 useState，就在数组中占一个位置（slot）。
+ *   每调用一次 Hook（如 useState / useEffect），就在数组中占一个位置（slot）。
  *   这就是为什么 Hook 的调用顺序必须一致 —— **顺序就是 ID**。
  *
  *   渲染流程：
@@ -23,7 +23,7 @@
  *      - 重置 hookIndex = 0
  *
  *   2. 组件函数执行时：
- *      - 每调用 useState(initialValue)
+ *      - 每调用 useState / useEffect / useRef
  *        → 从 currentComponent.__hooks[hookIndex] 读取已有状态
  *        → 或初始化新状态
  *        → hookIndex++
@@ -32,16 +32,13 @@
  *      - 检查 hookIndex 是否与上次一致（防止条件调用 Hook）
  *      - 清空 currentComponent = null
  *
- *   setState 触发重渲染：
+ *   useEffect 执行时机：
  *   ────────────────────
- *   setState(newValue)
- *     → 将更新推入 hook.queue
- *     → scheduleRerender(component)
- *       → 标记 component 为 dirty
- *       → 用 queueMicrotask 批量 flush
- *     → flushUpdates()
- *       → 对每个 dirty 的组件调用 renderComponent()
- *         → 设置上下文 → 调用组件函数 → 消费 queue → reconcile
+ *   useEffect(callback, deps)
+ *     → 组件渲染完成后（DOM 已更新）
+ *     → 对比依赖数组是否变化（Object.is 浅比较）
+ *     → 如果变化了 → 先执行上次的 cleanup，再执行新的 effect
+ *     → 组件卸载时 → 执行最后的 cleanup
  *
  * ============================================================
  */
@@ -59,7 +56,7 @@ let currentComponent = null
 
 /**
  * 当前 Hook 调用索引
- * 每调用一次 Hook（如 useState），索引递增
+ * 每调用一次 Hook，索引递增
  */
 let hookIndex = 0
 
@@ -87,97 +84,271 @@ export function setCurrentComponent(component) {
  * 同时进行 Hook 数量检查（防止条件调用 Hook）
  */
 export function clearCurrentComponent() {
-  // TODO: 实现 Hook 数量校验
-  //
-  // 在清除上下文前，检查 Hook 调用数量是否一致：
-  //
-  // 1. 如果 currentComponent.__expectedHookCount 尚未设置（首次渲染）：
-  //    - 记录当前 hookIndex 为期望值：
-  //      currentComponent.__expectedHookCount = hookIndex
-  //
-  // 2. 如果已有期望值，但与当前 hookIndex 不一致：
-  //    - 抛出错误：
-  //      throw new Error(
-  //        'Hook call order changed between renders. ' +
-  //        `Expected ${currentComponent.__expectedHookCount} hooks but got ${hookIndex}. ` +
-  //        'Hooks must not be called conditionally.'
-  //      )
-  //
-  // 3. 清空上下文：
-  //    currentComponent = null
+  if (currentComponent.__expectedHookCount == null) {
+    currentComponent.__expectedHookCount = hookIndex
+  } else if (currentComponent.__expectedHookCount !== hookIndex) {
+    throw new Error(
+      'Hook call order changed between renders. ' +
+      `Expected ${currentComponent.__expectedHookCount} hooks but got ${hookIndex}. ` +
+      'Hooks must not be called conditionally.'
+    )
+  }
 
   currentComponent = null
+}
+
+// ─── Hook 上下文校验 ──────────────────────────────────────────
+
+/**
+ * 校验当前是否在组件渲染上下文中
+ * 所有 Hook 都必须在函数组件顶层调用
+ *
+ * @param {string} hookName - Hook 名称，用于错误提示
+ */
+function assertHookContext(hookName) {
+  if (!currentComponent) {
+    throw new Error(
+      `${hookName} must be called inside a function component (at the top level)`
+    )
+  }
+}
+
+// ─── useReducer ───────────────────────────────────────────────
+
+/**
+ * useReducer Hook — useState 的泛化版本
+ *
+ * React 内部 useState 就是基于 useReducer 实现的。
+ * useReducer 适合管理复杂状态逻辑（多个子值、依赖前一状态）。
+ *
+ * @param {Function} reducer  - (state, action) => newState
+ * @param {*}        initialArg - 初始值（或传给 init 函数的参数）
+ * @param {Function} [init]   - 可选的惰性初始化函数
+ * @returns {[any, Function]} [state, dispatch]
+ *
+ * 示例：
+ *   function reducer(state, action) {
+ *     switch (action.type) {
+ *       case 'increment': return { count: state.count + 1 }
+ *       case 'decrement': return { count: state.count - 1 }
+ *       default: return state
+ *     }
+ *   }
+ *   const [state, dispatch] = useReducer(reducer, { count: 0 })
+ *   dispatch({ type: 'increment' })
+ */
+export function useReducer(reducer, initialArg, init) {
+  assertHookContext('useReducer')
+
+  const component = currentComponent
+  const idx = hookIndex++
+  const oldHook = component.__hooks[idx]
+
+  const hook = oldHook ?? {
+    state: init ? init(initialArg) : initialArg,
+    queue: [],
+  }
+
+  // 消费更新队列 — 按入队顺序依次执行
+  hook.queue.forEach(action => {
+    hook.state = reducer(hook.state, action)
+  })
+  hook.queue = []
+  component.__hooks[idx] = hook
+
+  // dispatch 是稳定的引用（闭包捕获 hook 和 component）
+  const dispatch = (action) => {
+    hook.queue.push(action)
+    scheduleRerender(component)
+  }
+
+  return [hook.state, dispatch]
 }
 
 // ─── useState ─────────────────────────────────────────────────
 
 /**
+ * useState 的内置 reducer
+ * action 可以是直接值或函数式更新
+ */
+function basicStateReducer(state, action) {
+  return typeof action === 'function' ? action(state) : action
+}
+
+/**
  * useState Hook — 为函数组件提供状态管理
+ *
+ * 本质上是 useReducer 的语法糖，内置了 basicStateReducer。
+ * 这与 React 源码的设计一致。
  *
  * @param {*} initialValue - 初始值，也可以是一个返回初始值的函数（惰性初始化）
  * @returns {[any, Function]} [state, setState]
  *
  * 示例：
  *   const [count, setCount] = useState(0)
- *   setCount(1)            // 直接赋值
+ *   setCount(1)                 // 直接赋值
  *   setCount(prev => prev + 1)  // 函数式更新
  */
 export function useState(initialValue) {
-  // TODO: 实现 useState
-  //
-  // 步骤：
-  //
-  // 1. 校验调用上下文：
-  //    if (!currentComponent) {
-  //      throw new Error('useState must be called inside a function component')
-  //    }
-  //
-  // 2. 捕获当前组件引用和 Hook 索引（闭包捕获，setState 需要用）：
-  //    const component = currentComponent
-  //    const idx = hookIndex++
-  //
-  // 3. 读取旧 Hook（如果是重新渲染，旧 Hook 已存在）：
-  //    const oldHook = component.__hooks[idx]
-  //
-  // 4. 创建或复用 Hook 对象：
-  //    const hook = oldHook ?? {
-  //      state: typeof initialValue === 'function' ? initialValue() : initialValue,
-  //      queue: [],
-  //    }
-  //
-  //    💡 要点：
-  //    - initialValue 如果是函数，调用它获取初始值（惰性初始化）
-  //    - queue 是一个数组，存放待处理的 setState 动作
-  //    - 只有首次渲染时才用 initialValue，之后复用旧 Hook
-  //
-  // 5. 消费更新队列（flush queue）：
-  //    hook.queue.forEach(action => {
-  //      hook.state = typeof action === 'function' ? action(hook.state) : action
-  //    })
-  //    hook.queue = []
-  //
-  //    💡 要点：
-  //    - 队列中的 action 可以是直接值或函数
-  //    - 函数式更新接收前一个状态作为参数
-  //    - 必须按入队顺序执行，保证语义一致性
-  //
-  // 6. 保存 Hook 到组件实例：
-  //    component.__hooks[idx] = hook
-  //
-  // 7. 创建 setState 函数：
-  //    const setState = (action) => {
-  //      hook.queue.push(action)
-  //      scheduleRerender(component)
-  //    }
-  //
-  //    💡 setState 不会立即更新状态！
-  //    它只是把更新动作推入队列，然后调度一次重渲染。
-  //    在下次 flush 时，步骤 5 会消费队列中的所有更新。
-  //
-  // 8. 返回 [state, setState]：
-  //    return [hook.state, setState]
+  assertHookContext('useState')
 
-  throw new Error('useState is not implemented yet — this is your TODO!')
+  const component = currentComponent
+  const idx = hookIndex++
+  const oldHook = component.__hooks[idx]
+
+  const hook = oldHook ?? {
+    state: typeof initialValue === 'function' ? initialValue() : initialValue,
+    queue: [],
+  }
+
+  // 消费更新队列
+  hook.queue.forEach(action => {
+    hook.state = basicStateReducer(hook.state, action)
+  })
+  hook.queue = []
+  component.__hooks[idx] = hook
+
+  const setState = (action) => {
+    hook.queue.push(action)
+    scheduleRerender(component)
+  }
+
+  return [hook.state, setState]
+}
+
+// ─── useEffect ────────────────────────────────────────────────
+
+/**
+ * useEffect Hook — 副作用管理
+ *
+ * 执行时机：
+ *   1. 组件渲染完成（DOM 已更新）后异步执行
+ *   2. 对比依赖数组是否变化（Object.is 浅比较）
+ *   3. 如果变化了 → 先执行上次的 cleanup，再执行新的 effect
+ *   4. 组件卸载时 → 执行最后的 cleanup
+ *
+ * @param {Function}  callback - effect 回调，可返回 cleanup 函数
+ * @param {Array}     [deps]   - 依赖数组（undefined 表示每次都执行）
+ *
+ * 示例：
+ *   // 每次渲染后执行
+ *   useEffect(() => { console.log('rendered') })
+ *
+ *   // 仅挂载时执行一次
+ *   useEffect(() => {
+ *     const id = setInterval(() => console.log('tick'), 1000)
+ *     return () => clearInterval(id)  // cleanup
+ *   }, [])
+ *
+ *   // deps 变化时执行
+ *   useEffect(() => { fetchData(id) }, [id])
+ */
+export function useEffect(callback, deps) {
+  assertHookContext('useEffect')
+
+  // 参数校验
+  if (typeof callback !== 'function') {
+    throw new Error('useEffect callback must be a function')
+  }
+  if (deps !== undefined && !Array.isArray(deps)) {
+    throw new Error('useEffect deps must be an array or undefined')
+  }
+
+  const component = currentComponent
+  const idx = hookIndex++
+  const oldHook = component.__hooks[idx]
+
+  // 依赖比较：首次渲染总是执行，后续根据 deps 变化判断
+  const hasChanged = oldHook
+    ? !deps || !oldHook.deps || deps.length !== oldHook.deps.length ||
+      deps.some((dep, i) => !Object.is(dep, oldHook.deps[i]))
+    : true
+
+  if (hasChanged) {
+    // 保存新 hook，保留旧的 cleanup 引用以便稍后执行
+    component.__hooks[idx] = {
+      tag: 'effect',
+      deps,
+      cleanup: oldHook?.cleanup,
+    }
+
+    const hookRef = component.__hooks[idx]
+
+    // 在 DOM 更新后异步执行 effect
+    queueMicrotask(() => {
+      // 先执行上次的 cleanup
+      if (hookRef.cleanup) {
+        hookRef.cleanup()
+      }
+      // 执行 effect，保存返回的 cleanup
+      const cleanup = callback()
+      if (cleanup !== undefined && typeof cleanup !== 'function') {
+        console.warn(
+          'useEffect callback must return either a cleanup function or undefined. ' +
+          `Got: ${typeof cleanup}`
+        )
+      }
+      hookRef.cleanup = typeof cleanup === 'function' ? cleanup : undefined
+    })
+  } else {
+    // 依赖没变，保留旧 hook
+    component.__hooks[idx] = oldHook
+  }
+}
+
+// ─── useRef ───────────────────────────────────────────────────
+
+/**
+ * useRef Hook — 跨渲染持久化的可变容器
+ *
+ * 返回 { current: initialValue } 对象，在组件生命周期内保持同一引用。
+ * 修改 .current 不会触发重新渲染（与 useState 的本质区别）。
+ *
+ * 常见用途：
+ *   - 保存 DOM 引用
+ *   - 保存定时器 ID
+ *   - 保存前一次渲染的值
+ *
+ * @param {*} initialValue - 初始值
+ * @returns {{ current: * }}
+ *
+ * 示例：
+ *   const inputRef = useRef(null)
+ *   // 在 effect 中：inputRef.current = domNode
+ *   // 读取：inputRef.current.focus()
+ */
+export function useRef(initialValue) {
+  assertHookContext('useRef')
+
+  const component = currentComponent
+  const idx = hookIndex++
+  const oldHook = component.__hooks[idx]
+
+  if (!oldHook) {
+    component.__hooks[idx] = { tag: 'ref', current: initialValue }
+  }
+
+  return component.__hooks[idx]
+}
+
+// ─── 组件卸载清理 ──────────────────────────────────────────────
+
+/**
+ * 卸载组件时执行所有 effect 的 cleanup
+ *
+ * 当 reconciler 发现组件被移除时调用此函数，
+ * 确保所有 useEffect 的清理函数都被正确执行。
+ *
+ * @param {Object} component - 组件 VNode
+ */
+export function unmountComponent(component) {
+  if (!component?.__hooks) return
+
+  component.__hooks.forEach(hook => {
+    if (hook?.cleanup && typeof hook.cleanup === 'function') {
+      hook.cleanup()
+    }
+  })
 }
 
 // ─── 重新渲染调度 ─────────────────────────────────────────────
@@ -202,47 +373,20 @@ let flushScheduled = false
  * @param {Object} component - 需要重渲染的组件 VNode
  */
 export function scheduleRerender(component) {
-  // TODO: 实现重渲染调度
-  //
-  // 步骤：
-  //
-  // 1. 将组件加入脏集合：
-  //    dirtyComponents.add(component)
-  //
-  // 2. 如果已经调度过 flush，就不重复调度：
-  //    if (flushScheduled) return
-  //
-  // 3. 标记已调度，并用 queueMicrotask 异步 flush：
-  //    flushScheduled = true
-  //    queueMicrotask(flushUpdates)
-  //
-  //    💡 为什么用 queueMicrotask？
-  //    因为我们希望在当前同步代码全部执行完后、
-  //    浏览器下一次渲染前，统一处理所有状态更新。
-  //    这样同一个事件处理器中多次 setState 只触发一次渲染。
-
-  throw new Error('scheduleRerender is not implemented yet — this is your TODO!')
+  dirtyComponents.add(component)
+  if (flushScheduled) return
+  flushScheduled = true
+  queueMicrotask(flushUpdates)
 }
 
 /**
  * 批量执行所有脏组件的重渲染
  */
 function flushUpdates() {
-  // TODO: 实现批量 flush
-  //
-  // 步骤：
-  //
-  // 1. 重置调度标志：
-  //    flushScheduled = false
-  //
-  // 2. 取出所有脏组件（snapshot），然后清空集合：
-  //    const pending = Array.from(dirtyComponents)
-  //    dirtyComponents.clear()
-  //
-  // 3. 对每个脏组件调用 renderComponent：
-  //    pending.forEach(renderComponent)
-
-  throw new Error('flushUpdates is not implemented yet — this is your TODO!')
+  flushScheduled = false
+  const pending = Array.from(dirtyComponents)
+  dirtyComponents.clear()
+  pending.forEach(renderComponent)
 }
 
 // ─── 组件重渲染 ──────────────────────────────────────────────
@@ -256,34 +400,15 @@ function flushUpdates() {
  * @param {Object} component - 组件 VNode
  */
 function renderComponent(component) {
-  // TODO: 实现组件重渲染
-  //
-  // 步骤：
-  //
-  // 1. 设置 Hook 上下文（让 useState 知道当前组件是谁）：
-  //    setCurrentComponent(component)
-  //
-  // 2. 调用组件函数，获取新的 VNode 树：
-  //    const newChildVNode = component.type(component.props)
-  //
-  //    💡 component.type 就是组件函数
-  //    💡 component.props 是组件的当前 props
-  //
-  // 3. 找到父 DOM 节点（组件需要知道自己挂载在哪里）：
-  //    const parentDom = component.__parentDom
-  //
-  //    💡 __parentDom 需要在 reconcile 中首次渲染组件时保存
-  //    详见 reconciler.js 中的 TODO
-  //
-  // 4. 协调更新（用旧的子 VNode 和新的子 VNode 做 Diff）：
-  //    reconcile(parentDom, component.__childVNode, newChildVNode)
-  //
-  // 5. 更新组件上缓存的子 VNode 和 DOM 引用：
-  //    component.__childVNode = newChildVNode
-  //    component.__dom = getComponentDom(newChildVNode)
-  //
-  // 6. 清理 Hook 上下文：
-  //    clearCurrentComponent()
-
-  throw new Error('renderComponent is not implemented yet — this is your TODO!')
+  setCurrentComponent(component)
+  let newChildVNode
+  try {
+    newChildVNode = component.type(component.props)
+  } finally {
+    clearCurrentComponent()
+  }
+  const parentDom = component.__parentDom
+  reconcile(parentDom, component.__childVNode, newChildVNode)
+  component.__childVNode = newChildVNode
+  component.__dom = getComponentDom(newChildVNode)
 }
