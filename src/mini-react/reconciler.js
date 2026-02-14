@@ -90,6 +90,18 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
   //
   //   注意：这不是 return，而是修改 oldVNode 后继续往下走
   //
+  if (isComponent(newVNode)) {
+    const childVNode = newVNode.type(newVNode.props)
+    const oldChildVNode = isComponent(oldVNode) ? oldVNode.__childVNode : oldVNode
+    reconcile(parentDom, oldChildVNode ?? null, childVNode)
+    newVNode.__childVNode = childVNode
+    newVNode.__dom = getComponentDom(childVNode)
+    return
+  }
+
+  if (isComponent(oldVNode)) {
+    oldVNode = oldVNode.__childVNode
+  }
 
   // ── 以下是 Phase 3 已实现的原生元素协调逻辑 ──────────────
 
@@ -150,6 +162,13 @@ function mountVNode(vnode) {
   //   5. return dom
   //
   // 否则走原有的原生元素挂载逻辑（下面已实现的代码）
+  if(isComponent(vnode)){
+    const childVNode = vnode.type(vnode.props)
+    const dom = mountVNode(childVNode)
+    vnode.__childVNode = childVNode
+    vnode.__dom = dom
+    return dom
+  }
 
   const dom = createDom(vnode)
   vnode.__dom = dom
