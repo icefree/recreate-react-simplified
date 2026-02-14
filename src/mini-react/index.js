@@ -10,6 +10,7 @@ import { render, createDom, updateProps } from './render.js'
 import { reconcile } from './reconciler.js'
 import { createRoot } from './root.js'
 import { isComponent, getComponentDom } from './component.js'
+import { useState } from './hooks.js'
 
 const MiniReact = {
   createElement,
@@ -20,8 +21,9 @@ const MiniReact = {
   updateProps,
   isComponent,
   getComponentDom,
+  useState,
   TEXT_ELEMENT,
 }
 
-export { createElement, render, createRoot, reconcile, createDom, updateProps, isComponent, getComponentDom, TEXT_ELEMENT }
+export { createElement, render, createRoot, reconcile, createDom, updateProps, isComponent, getComponentDom, useState, TEXT_ELEMENT }
 export default MiniReact

@@ -1,11 +1,11 @@
 /**
- * Phase 4 Playground — 函数式组件
+ * Phase 5 Playground — useState Hook
  *
- * 🎯 目标：验证函数式组件的核心能力
+ * 🎯 目标：验证 useState 的核心能力
  *
- * 入口文件直接引入 phase4 playground，
- * 历史阶段代码保留在 main.js / playground 目录中。
+ * 入口文件直接引入 phase5 playground，
+ * 历史阶段代码保留在 playground 目录中。
  */
 
-// Phase 4: 函数式组件
-import "./playground/phase4.jsx";
+// Phase 5: useState Hook
+import "./playground/phase5.jsx";

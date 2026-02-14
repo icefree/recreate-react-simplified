@@ -30,6 +30,7 @@
 import { TEXT_ELEMENT } from './createElement.js'
 import { createDom, updateProps } from './render.js'
 import { isComponent, getComponentDom } from './component.js'
+import { setCurrentComponent, clearCurrentComponent } from './hooks.js'
 
 // ─── 主入口 ───────────────────────────────────────────────────
 
@@ -91,7 +92,26 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
   //   注意：这不是 return，而是修改 oldVNode 后继续往下走
   //
   if (isComponent(newVNode)) {
+    // TODO (Phase 5): 设置 Hook 上下文
+    //
+    // 在调用组件函数之前，需要设置 Hook 上下文：
+    //   setCurrentComponent(newVNode)
+    //
+    // 这样组件函数内部的 useState 调用才能知道
+    // 状态应该存储在哪个组件的 __hooks 数组中。
+    //
+    // 同时保存 __parentDom，供 setState 触发重渲染时定位父 DOM：
+    //   newVNode.__parentDom = parentDom
+
     const childVNode = newVNode.type(newVNode.props)
+
+    // TODO (Phase 5): 清除 Hook 上下文
+    //
+    // 组件函数执行完毕后，清除上下文：
+    //   clearCurrentComponent()
+    //
+    // 这也会进行 Hook 数量校验（在 clearCurrentComponent 中实现）
+
     const oldChildVNode = isComponent(oldVNode) ? oldVNode.__childVNode : oldVNode
     reconcile(parentDom, oldChildVNode ?? null, childVNode)
     newVNode.__childVNode = childVNode
@@ -163,7 +183,24 @@ function mountVNode(vnode) {
   //
   // 否则走原有的原生元素挂载逻辑（下面已实现的代码）
   if(isComponent(vnode)){
+    // TODO (Phase 5): 设置 Hook 上下文（同 reconcile 中的逻辑）
+    //   setCurrentComponent(vnode)
+    //   vnode.__parentDom = ???
+    //
+    // 💡 mountVNode 没有 parentDom 参数，
+    //    但此时 __parentDom 的设置可以推迟到 reconcile 阶段。
+    //    reconcile 调用 mountVNode 之前已经有了 parentDom。
+    //    所以这里可以先不设置 __parentDom，
+    //    而是在 reconcile 的函数组件分支里设置。
+    //
+    //    不过仍然需要 setCurrentComponent/clearCurrentComponent，
+    //    这样嵌套在组件内的子组件也能正确注册 hooks。
+
     const childVNode = vnode.type(vnode.props)
+
+    // TODO (Phase 5): 清除 Hook 上下文
+    //   clearCurrentComponent()
+
     const dom = mountVNode(childVNode)
     vnode.__childVNode = childVNode
     vnode.__dom = dom
