@@ -16,7 +16,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createElement } from '../src/mini-react/createElement.js'
-import { reconcile } from '../src/mini-react/reconciler.js'
+import { reconcile, commitRoot, setDebugMode } from '../src/mini-react/reconciler.js'
 import { createRoot } from '../src/mini-react/root.js'
 
 // ─── reconcile 基本场景 ──────────────────────────────────────
@@ -26,6 +26,7 @@ describe('reconcile', () => {
 
   beforeEach(() => {
     container = document.createElement('div')
+    setDebugMode(false)  // 测试中关闭调试日志
   })
 
   // ─── 新增节点 ─────────────────────────────────────────────
@@ -33,6 +34,7 @@ describe('reconcile', () => {
   it('oldVNode 为 null 时应创建新节点', () => {
     const vnode = createElement('p', null, 'Hello')
     reconcile(container, null, vnode)
+    commitRoot()  // Phase 2: 提交 DOM 变更
 
     expect(container.innerHTML).toBe('<p>Hello</p>')
   })
@@ -47,9 +49,11 @@ describe('reconcile', () => {
   it('newVNode 为 null 时应删除旧节点', () => {
     const old = createElement('div', null, 'content')
     reconcile(container, null, old)
+    commitRoot()
     expect(container.childNodes.length).toBe(1)
 
     reconcile(container, old, null)
+    commitRoot()
     expect(container.childNodes.length).toBe(0)
   })
 
@@ -58,10 +62,12 @@ describe('reconcile', () => {
   it('类型不同时应替换节点', () => {
     const old = createElement('p', null, 'old')
     reconcile(container, null, old)
+    commitRoot()
     expect(container.innerHTML).toBe('<p>old</p>')
 
     const next = createElement('div', null, 'new')
     reconcile(container, old, next)
+    commitRoot()
     expect(container.innerHTML).toBe('<div>new</div>')
   })
 
@@ -70,10 +76,12 @@ describe('reconcile', () => {
   it('类型相同时应更新属性而不重建 DOM', () => {
     const old = createElement('div', { id: 'a', className: 'old' })
     reconcile(container, null, old)
+    commitRoot()
     const domRef = container.firstChild
 
     const next = createElement('div', { id: 'b', className: 'new' })
     reconcile(container, old, next)
+    commitRoot()
 
     // DOM 节点应该是同一个（没有重建）
     expect(container.firstChild).toBe(domRef)
@@ -84,19 +92,23 @@ describe('reconcile', () => {
   it('应删除旧属性中不再存在的属性', () => {
     const old = createElement('div', { id: 'test', className: 'foo' })
     reconcile(container, null, old)
+    commitRoot()
     expect(container.firstChild.className).toBe('foo')
 
     const next = createElement('div', { id: 'test' })
     reconcile(container, old, next)
+    commitRoot()
     expect(container.firstChild.className).toBe('')
   })
 
   it('应正确更新 style', () => {
     const old = createElement('div', { style: { color: 'red', fontSize: '16px' } })
     reconcile(container, null, old)
+    commitRoot()
 
     const next = createElement('div', { style: { color: 'blue' } })
     reconcile(container, old, next)
+    commitRoot()
 
     expect(container.firstChild.style.color).toBe('blue')
     // fontSize 不再存在于新 style，应被清除
@@ -108,10 +120,12 @@ describe('reconcile', () => {
   it('文本内容变化时只更新 nodeValue', () => {
     const old = createElement('p', null, 'Hello')
     reconcile(container, null, old)
+    commitRoot()
 
     const textNode = container.firstChild.firstChild
     const next = createElement('p', null, 'World')
     reconcile(container, old, next)
+    commitRoot()
 
     // p 节点不变
     expect(container.firstChild.nodeName).toBe('P')
@@ -124,6 +138,7 @@ describe('reconcile', () => {
   it('应能添加新的子节点', () => {
     const old = createElement('ul', null, createElement('li', null, 'A'))
     reconcile(container, null, old)
+    commitRoot()
     expect(container.querySelectorAll('li').length).toBe(1)
 
     const next = createElement(
@@ -133,6 +148,7 @@ describe('reconcile', () => {
       createElement('li', null, 'B')
     )
     reconcile(container, old, next)
+    commitRoot()
     expect(container.querySelectorAll('li').length).toBe(2)
     expect(container.querySelectorAll('li')[1].textContent).toBe('B')
   })
@@ -146,10 +162,12 @@ describe('reconcile', () => {
       createElement('li', null, 'C')
     )
     reconcile(container, null, old)
+    commitRoot()
     expect(container.querySelectorAll('li').length).toBe(3)
 
     const next = createElement('ul', null, createElement('li', null, 'A'))
     reconcile(container, old, next)
+    commitRoot()
     expect(container.querySelectorAll('li').length).toBe(1)
   })
 })
@@ -161,6 +179,7 @@ describe('reconcile with keys', () => {
 
   beforeEach(() => {
     container = document.createElement('div')
+    setDebugMode(false)
   })
 
   it('key 稳定时应复用 DOM 节点', () => {
@@ -172,6 +191,7 @@ describe('reconcile with keys', () => {
       createElement('li', { key: 'c' }, 'C')
     )
     reconcile(container, null, old)
+    commitRoot()
 
     const domA = container.querySelectorAll('li')[0]
     const domB = container.querySelectorAll('li')[1]
@@ -185,6 +205,7 @@ describe('reconcile with keys', () => {
       createElement('li', { key: 'c' }, 'C')
     )
     reconcile(container, old, next)
+    commitRoot()
 
     const lis = container.querySelectorAll('li')
     expect(lis.length).toBe(3)
@@ -203,6 +224,7 @@ describe('reconcile with keys', () => {
       createElement('li', { key: 'c' }, 'C')
     )
     reconcile(container, null, old)
+    commitRoot()
 
     const next = createElement(
       'ul',
@@ -212,6 +234,7 @@ describe('reconcile with keys', () => {
       createElement('li', { key: 'c' }, 'C')
     )
     reconcile(container, old, next)
+    commitRoot()
 
     const lis = container.querySelectorAll('li')
     expect(lis.length).toBe(3)
@@ -229,6 +252,7 @@ describe('reconcile with keys', () => {
       createElement('li', { key: 'c' }, 'C')
     )
     reconcile(container, null, old)
+    commitRoot()
 
     const next = createElement(
       'ul',
@@ -237,6 +261,7 @@ describe('reconcile with keys', () => {
       createElement('li', { key: 'c' }, 'C')
     )
     reconcile(container, old, next)
+    commitRoot()
 
     const lis = container.querySelectorAll('li')
     expect(lis.length).toBe(2)
