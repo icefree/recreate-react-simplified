@@ -154,20 +154,14 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     parentDom.appendChild(dom)
   }else
   if(newVNode == null){
-    // TODO (Phase 6): 节点被删除时，执行卸载清理
-    //
-    // 在 removeChild 之前，递归清理整棵旧子树中的组件 effects：
-    unmountVNode(oldVNode)
-    //
+    // Phase 6: 节点被删除时，递归清理整棵旧子树中的 effects
+    cleanupEffects(oldVNode)
     const dom = oldVNode.__dom
     parentDom.removeChild(dom)
   }else
   if(oldVNode.type !== newVNode.type){
-    // TODO (Phase 6): 类型变化时，清理旧节点的 effects
-    //
-    // 在 replaceChild 之前，递归清理旧子树：
-    unmountVNode(oldVNode)
-    //
+    // Phase 6: 类型变化时，清理旧子树的 effects
+    cleanupEffects(oldVNode)
     const dom = mountVNode(newVNode)
     parentDom.replaceChild(dom, oldVNode.__dom)
   }else
@@ -185,43 +179,26 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
   }
 }
 
-// ─── 卸载（递归清理 Effects） ─────────────────────────────────
+// ─── 递归清理 Effects ─────────────────────────────────────────
 
 /**
- * 递归卸载 VNode 树
- * 确保所有组件的 useEffect cleanup 都被执行
+ * 递归清理 VNode 树中所有组件的 useEffect cleanup
  *
- * TODO (Phase 6): 实现 unmountVNode
- *
- * 这个函数需要递归遍历整棵 VNode 树，
- * 对每个函数组件调用 unmountComponent 来执行 cleanup。
+ * ⚠️ 只负责清理副作用，不删除 DOM（DOM 删除由 reconcile 负责）
  *
  * 为什么需要递归？
  * 因为被删除的节点可能包含嵌套的组件，每个都可能有 useEffect。
  *
- * 步骤：
- *   1. 安全检查：if (!vnode) return
- *
- *   2. 如果是函数组件：
- *      - 调用 unmountComponent(vnode) 执行其 cleanup
- *      - 递归处理子 VNode：unmountVNode(vnode.__childVNode)
- *
- *   3. 如果是原生元素：
- *      - 递归处理所有子节点：
- *        vnode.props?.children?.forEach(child => unmountVNode(child))
- *
- * @param {Object} vnode - 要卸载的 VNode
+ * @param {Object} vnode - 要清理的 VNode
  */
-function unmountVNode(vnode) {
-  // TODO: 实现递归卸载
-  //
-  // 💡 提示：实现这个函数后，还需要在 reconcile 中的
-  //    3 个位置调用它（见上方的 TODO 注释）
+function cleanupEffects(vnode) {
+  if (!vnode) return
+
   if(isComponent(vnode)){
     unmountComponent(vnode)
-    unmountVNode(vnode.__childVNode)
+    cleanupEffects(vnode.__childVNode)
   }else{
-    vnode.props?.children?.forEach(child => unmountVNode(child))
+    vnode.props?.children?.forEach(child => cleanupEffects(child))
   }
 }
 
