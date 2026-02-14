@@ -24,6 +24,13 @@
  *   - 函数组件 VNode：__childVNode 保存调用函数后得到的子 VNode 树
  *     函数组件不产生自己的 DOM 节点，其"DOM"就是子 VNode 树的根 DOM
  *
+ * Phase 6 新增职责：
+ *   - 组件卸载时执行 useEffect 的 cleanup 函数
+ *   - 需要在以下 3 个位置调用 unmountComponent / unmountVNode：
+ *     1. 组件被替换为非组件时（isComponent(oldVNode) && !isComponent(newVNode)）
+ *     2. 节点被删除时（newVNode == null）
+ *     3. 节点类型变化时（oldVNode.type !== newVNode.type）
+ *
  * ============================================================
  */
 
@@ -109,12 +116,9 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     setCurrentComponent(newVNode)
     newVNode.__parentDom = parentDom
 
-    let childVNode
-    try {
-      childVNode = newVNode.type(newVNode.props)
-    } finally {
-      clearCurrentComponent()
-    }
+    const childVNode = newVNode.type(newVNode.props)
+
+    clearCurrentComponent()
     // TODO (Phase 5): 清除 Hook 上下文
     //
     // 组件函数执行完毕后，清除上下文：
@@ -130,8 +134,12 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
   }
 
   if (isComponent(oldVNode)) {
-    // Phase 6: 组件被替换为非组件时，先清理 effects
-    unmountComponent(oldVNode)
+    // TODO (Phase 6): 组件被替换为非组件时，清理 effects
+    //
+    // 当一个函数组件被替换为原生元素时，需要先执行组件的清理：
+    //   unmountComponent(oldVNode)
+    //
+    // 然后再解包：
     oldVNode = oldVNode.__childVNode
   }
 
@@ -143,14 +151,20 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     parentDom.appendChild(dom)
   }else
   if(newVNode == null){
-    // Phase 6: 组件卸载时执行 cleanup
-    unmountVNode(oldVNode)
+    // TODO (Phase 6): 节点被删除时，执行卸载清理
+    //
+    // 在 removeChild 之前，递归清理整棵旧子树中的组件 effects：
+    //   unmountVNode(oldVNode)
+    //
     const dom = oldVNode.__dom
     parentDom.removeChild(dom)
   }else
   if(oldVNode.type !== newVNode.type){
-    // Phase 6: 类型变化时也需要清理旧组件的 effects
-    unmountVNode(oldVNode)
+    // TODO (Phase 6): 类型变化时，清理旧节点的 effects
+    //
+    // 在 replaceChild 之前，递归清理旧子树：
+    //   unmountVNode(oldVNode)
+    //
     const dom = mountVNode(newVNode)
     parentDom.replaceChild(dom, oldVNode.__dom)
   }else
@@ -174,20 +188,32 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
  * 递归卸载 VNode 树
  * 确保所有组件的 useEffect cleanup 都被执行
  *
+ * TODO (Phase 6): 实现 unmountVNode
+ *
+ * 这个函数需要递归遍历整棵 VNode 树，
+ * 对每个函数组件调用 unmountComponent 来执行 cleanup。
+ *
+ * 为什么需要递归？
+ * 因为被删除的节点可能包含嵌套的组件，每个都可能有 useEffect。
+ *
+ * 步骤：
+ *   1. 安全检查：if (!vnode) return
+ *
+ *   2. 如果是函数组件：
+ *      - 调用 unmountComponent(vnode) 执行其 cleanup
+ *      - 递归处理子 VNode：unmountVNode(vnode.__childVNode)
+ *
+ *   3. 如果是原生元素：
+ *      - 递归处理所有子节点：
+ *        vnode.props?.children?.forEach(child => unmountVNode(child))
+ *
  * @param {Object} vnode - 要卸载的 VNode
  */
 function unmountVNode(vnode) {
-  if (!vnode) return
-
-  if (isComponent(vnode)) {
-    // 执行组件自身的 effect cleanup
-    unmountComponent(vnode)
-    // 递归清理子 VNode
-    unmountVNode(vnode.__childVNode)
-  } else if (vnode.props?.children) {
-    // 原生元素，递归清理子节点
-    vnode.props.children.forEach(child => unmountVNode(child))
-  }
+  // TODO: 实现递归卸载
+  //
+  // 💡 提示：实现这个函数后，还需要在 reconcile 中的
+  //    3 个位置调用它（见上方的 TODO 注释）
 }
 
 // ─── 挂载（递归创建 DOM） ─────────────────────────────────────
@@ -223,12 +249,9 @@ function mountVNode(vnode) {
   if(isComponent(vnode)){
     setCurrentComponent(vnode)
 
-    let childVNode
-    try {
-      childVNode = vnode.type(vnode.props)
-    } finally {
-      clearCurrentComponent()
-    }
+    const childVNode = vnode.type(vnode.props)
+
+    clearCurrentComponent()
 
     const dom = mountVNode(childVNode)
     vnode.__childVNode = childVNode
