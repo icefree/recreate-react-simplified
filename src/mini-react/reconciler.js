@@ -50,7 +50,7 @@ import { createDom, updateProps } from './render.js'
 import { isComponent, getComponentDom } from './component.js'
 import { setCurrentComponent, clearCurrentComponent, unmountComponent } from './hooks.js'
 
-// ─── Effect 类型常量 ────────────────────────────────────────
+// ─── Mutation 类型常量 ────────────────────────────────────────
 
 const PLACEMENT = 'PLACEMENT'  // appendChild — 新增节点
 const DELETION  = 'DELETION'   // removeChild — 删除节点
@@ -58,13 +58,13 @@ const REPLACE   = 'REPLACE'    // replaceChild — 替换节点
 const UPDATE    = 'UPDATE'     // updateProps — 属性更新
 const REORDER   = 'REORDER'    // insertBefore — 重排序
 
-// ─── Effect 收集器 ──────────────────────────────────────────
+// ─── Mutation 收集器 ──────────────────────────────────────────
 
 /**
- * 待提交的 effect 列表
+ * 待提交的 mutation 列表
  * Render Phase 中收集，Commit Phase 中消费
  *
- * 每个 effect 的结构：
+ * 每个 mutation 的结构：
  *   {
  *     type: PLACEMENT | DELETION | REPLACE | UPDATE | REORDER,
  *     parentDom: HTMLElement,   // 父 DOM 节点
@@ -127,7 +127,7 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     oldVNode = oldVNode.__childVNode
   }
 
-  // ── 原生元素协调（收集 effects，不直接操作 DOM） ──────────
+  // ── 原生元素协调（收集 mutation，不直接操作 DOM） ──────────
 
   if (oldVNode == null) {
     if (newVNode == null) return
@@ -135,7 +135,7 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     // 创建 DOM 子树（Render Phase 的一部分 — 构建 detached 的 DOM 树）
     const dom = mountVNode(newVNode)
 
-    // 📦 收集 PLACEMENT effect（延迟到 Commit Phase 执行 appendChild）
+    // 📦 收集 PLACEMENT mutation（延迟到 Commit Phase 执行 appendChild）
     pendingMutations.push({
       type: PLACEMENT,
       dom,
@@ -147,7 +147,7 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     cleanupEffects(oldVNode)
     const dom = oldVNode.__dom
 
-    // 📦 收集 DELETION effect（延迟到 Commit Phase 执行 removeChild）
+    // 📦 收集 DELETION mutation（延迟到 Commit Phase 执行 removeChild）
     pendingMutations.push({
       type: DELETION,
       dom,
@@ -160,7 +160,7 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     const newDom = mountVNode(newVNode)
     const oldDom = oldVNode.__dom
 
-    // 📦 收集 REPLACE effect（延迟到 Commit Phase 执行 replaceChild）
+    // 📦 收集 REPLACE mutation（延迟到 Commit Phase 执行 replaceChild）
     pendingMutations.push({
       type: REPLACE,
       newDom,
@@ -172,7 +172,7 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     if (oldVNode.type === TEXT_ELEMENT) {
       newVNode.__dom = oldVNode.__dom
       if (oldVNode.props.nodeValue !== newVNode.props.nodeValue) {
-        // 📦 收集 UPDATE effect（文本节点内容变化）
+        // 📦 收集 UPDATE mutation（延迟到 Commit Phase 执行 updateProps）
         pendingMutations.push({
           type: UPDATE,
           updateFn: () => { oldVNode.__dom.nodeValue = newVNode.props.nodeValue },
@@ -191,7 +191,7 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
       )
 
       if (hasPropsChanged) {
-        // 📦 收集 UPDATE effect（属性变化）
+        // 📦 收集 UPDATE mutation（延迟到 Commit Phase 执行 updateProps）  
         pendingMutations.push({
           type: UPDATE,
           updateFn: () => { updateProps(newVNode.__dom, oldProps, newProps) },
@@ -350,50 +350,54 @@ function reconcileKeyedChildren(parentDom, oldChildren, newChildren) {
  *
  * 步骤：
  *   1. 取出 pendingMutations 并将其重置为空数组（准备下一轮）
- *      const effects = pendingMutations
+ *      const mutations = pendingMutations
  *      pendingMutations = []
  *
- *   2. 如果没有 effects 就直接 return
+ *   2. 如果没有 mutations 就直接 return
  *
- *   3. 遍历 effects 数组，对每个 effect 调用 commitMutation(effect)
+ *   3. 遍历 mutations 数组，对每个 mutation 调用 commitMutation(mutation)
  *
  * 💡 为什么先赋值再重置？
  *    如果在 commitMutation 过程中触发了新的 reconcile（比如通过 setState），
- *    新的 effects 会被收集到新的 pendingMutations 数组中，不会和当前这批混在一起。
+ *    新的 mutations 会被收集到新的 pendingMutations 数组中，不会和当前这批混在一起。
  */
 export function commitRoot() {
   // TODO: 实现 commitRoot
   // 提示：3 行核心逻辑
-  //   1. 保存当前 effects 并重置 pendingMutations
-  //   2. 提前 return 如果没有 effects
-  //   3. 遍历 effects，调用 commitMutation
+  //   1. 保存当前 mutations 并重置 pendingMutations
+  //   2. 提前 return 如果没有 mutations
+  //   3. 遍历 mutations，调用 commitMutation
+  const mutations = pendingMutations
+  pendingMutations = []
+  if (mutations.length === 0) return
+  mutations.forEach(mutation => commitMutation(mutation))
 }
 
 /**
- * commitMutation — 执行单个 effect，将变更应用到 DOM
+ * commitMutation — 执行单个 mutation，将变更应用到 DOM
  *
  * TODO: 实现这个函数
  *
- * 根据 effect.type 执行对应的 DOM 操作：
+ * 根据 mutation.type 执行对应的 DOM 操作：
  *
  *   ┌──────────────┬────────────────────────────────────────────────┐
- *   │ Effect Type  │ DOM 操作                                       │
+ *   │ Mutation Type│ DOM 操作                                       │
  *   ├──────────────┼────────────────────────────────────────────────┤
- *   │ PLACEMENT    │ effect.parentDom.appendChild(effect.dom)       │
+ *   │ PLACEMENT    │ mutation.parentDom.appendChild(mutation.dom)   │
  *   │              │ 将新建的 DOM 子树挂载到父节点                    │
  *   ├──────────────┼────────────────────────────────────────────────┤
- *   │ DELETION     │ effect.parentDom.removeChild(effect.dom)       │
+ *   │ DELETION     │ mutation.parentDom.removeChild(mutation.dom)   │
  *   │              │ 从 DOM 树中移除节点                             │
  *   ├──────────────┼────────────────────────────────────────────────┤
- *   │ REPLACE      │ effect.parentDom.replaceChild(                 │
- *   │              │   effect.newDom, effect.oldDom                 │
+ *   │ REPLACE      │ mutation.parentDom.replaceChild(                 │
+ *   │              │   mutation.newDom, mutation.oldDom                 │
  *   │              │ )                                              │
  *   │              │ 用新节点替换旧节点                              │
  *   ├──────────────┼────────────────────────────────────────────────┤
- *   │ UPDATE       │ effect.updateFn()                              │
+ *   │ UPDATE       │ mutation.updateFn()                              │
  *   │              │ 执行预设的更新函数（更新属性 / nodeValue）       │
  *   ├──────────────┼────────────────────────────────────────────────┤
- *   │ REORDER      │ 遍历 effect.desiredOrder，                     │
+ *   │ REORDER      │ 遍历 mutation.desiredOrder，                     │
  *   │              │ 逐个 insertBefore 确保子节点顺序正确            │
  *   │              │                                                │
  *   │              │ desiredOrder.forEach((dom, i) => {             │
@@ -405,11 +409,35 @@ export function commitRoot() {
  *   └──────────────┴────────────────────────────────────────────────┘
  *
  * 步骤：
- *   使用 switch (effect.type) 分发到不同的 DOM 操作
+ *   使用 switch (mutation.type) 分发到不同的 DOM 操作
  *
- * @param {Object} effect - 待执行的 effect 对象
+ * @param {Object} mutation - 待执行的 mutation 对象
  */
-function commitMutation(effect) {
+function commitMutation(mutation) {
   // TODO: 实现 commitMutation
-  // 提示：switch on effect.type，5 个 case 对应 5 种 DOM 操作
+  // 提示：switch on mutation.type，5 个 case 对应 5 种 DOM 操作
+  switch (mutation.type) {
+    case PLACEMENT:
+      mutation.parentDom.appendChild(mutation.dom)
+      break
+    case DELETION:
+      mutation.parentDom.removeChild(mutation.dom)
+      break
+    case REPLACE:
+      mutation.parentDom.replaceChild(mutation.newDom, mutation.oldDom)
+      break
+    case UPDATE:
+      mutation.updateFn()
+      break
+    case REORDER:
+      mutation.desiredOrder.forEach((dom, i) => {
+        const current = mutation.parentDom.childNodes[i]
+        if (dom !== current) {
+          mutation.parentDom.insertBefore(dom, current)
+        }
+      })
+      break
+    default:
+      break
+  }
 }
