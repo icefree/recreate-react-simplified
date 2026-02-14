@@ -7,7 +7,7 @@
 
 import { createElement, TEXT_ELEMENT } from './createElement.js'
 import { render, createDom, updateProps } from './render.js'
-import { reconcile, commitRoot, setDebugMode } from './reconciler.js'
+import { reconcile, commitRoot } from './reconciler.js'
 import { createRoot } from './root.js'
 import { isComponent, getComponentDom } from './component.js'
 import { useState, useEffect, useRef, useReducer } from './hooks.js'
@@ -18,7 +18,6 @@ const MiniReact = {
   createRoot,
   reconcile,
   commitRoot,
-  setDebugMode,
   createDom,
   updateProps,
   isComponent,
@@ -30,5 +29,5 @@ const MiniReact = {
   TEXT_ELEMENT,
 }
 
-export { createElement, render, createRoot, reconcile, commitRoot, setDebugMode, createDom, updateProps, isComponent, getComponentDom, useState, useEffect, useRef, useReducer, TEXT_ELEMENT }
+export { createElement, render, createRoot, reconcile, commitRoot, createDom, updateProps, isComponent, getComponentDom, useState, useEffect, useRef, useReducer, TEXT_ELEMENT }
 export default MiniReact

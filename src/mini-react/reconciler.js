@@ -28,6 +28,15 @@
  *   │  这一步是同步的、不可中断的。                           │
  *   └─────────────────────────────────────────────────────────┘
  *
+ * 📌 为什么要分两个阶段？
+ *
+ *   1. **一致性**：Render Phase 可以被中断/重启（React Concurrent Mode），
+ *      但 Commit Phase 必须同步完成，保证 DOM 不会处于中间状态。
+ *
+ *   2. **批量优化**：收集所有变更后一次性应用，减少浏览器重排/重绘。
+ *
+ *   3. **可预测性**：effect 列表可以被检查、排序、甚至回滚。
+ *
  * React Diff 三大假设：
  *   1. 不同类型的元素产生不同的树 → 类型变了整棵替换
  *   2. 同层级比较 → 不跨层级移动节点
@@ -54,38 +63,28 @@ const REORDER   = 'REORDER'    // insertBefore — 重排序
 /**
  * 待提交的 effect 列表
  * Render Phase 中收集，Commit Phase 中消费
+ *
+ * 每个 effect 的结构：
+ *   {
+ *     type: PLACEMENT | DELETION | REPLACE | UPDATE | REORDER,
+ *     parentDom: HTMLElement,   // 父 DOM 节点
+ *     dom?: HTMLElement,        // PLACEMENT / DELETION 的目标 DOM
+ *     newDom?: HTMLElement,     // REPLACE 的新 DOM
+ *     oldDom?: HTMLElement,     // REPLACE 的旧 DOM
+ *     updateFn?: Function,     // UPDATE 的更新函数
+ *     desiredOrder?: Array,    // REORDER 的期望子节点顺序
+ *   }
  */
 let pendingEffects = []
 
 /**
- * 调试开关 — 设为 true 可在控制台看到两阶段的详细执行过程
- * 也可以通过 setDebugMode(true) 动态开启
+ * 获取当前 pendingEffects（供测试使用）
  */
-let DEBUG = true
-
-export function setDebugMode(enabled) {
-  DEBUG = enabled
+export function getPendingEffects() {
+  return pendingEffects
 }
 
-// ─── 辅助：描述 VNode 类型（用于日志） ──────────────────────
-
-function describeVNode(vnode) {
-  if (!vnode) return 'null'
-  if (isComponent(vnode)) return `<${vnode.type.name || 'Anonymous'} />`
-  if (vnode.type === TEXT_ELEMENT) {
-    const text = vnode.props.nodeValue
-    return `"${text.length > 20 ? text.slice(0, 20) + '...' : text}"`
-  }
-  return `<${vnode.type}>`
-}
-
-function describeDom(dom) {
-  if (!dom) return 'null'
-  if (dom.nodeType === 3) return `"${dom.nodeValue?.slice(0, 15) || ''}"`
-  return `<${dom.tagName?.toLowerCase() || 'unknown'}${dom.id ? '#' + dom.id : ''}>`
-}
-
-// ─── 主入口 ───────────────────────────────────────────────────
+// ─── 主入口（Render Phase） ──────────────────────────────────
 
 /**
  * 协调单个节点（Render Phase）
@@ -102,16 +101,12 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
   // ── 函数式组件处理 ────────────────────────────────────────
 
   if (isComponent(newVNode)) {
-    if(isComponent(oldVNode) && oldVNode.type === newVNode.type){
+    if (isComponent(oldVNode) && oldVNode.type === newVNode.type) {
       newVNode.__hooks = oldVNode.__hooks
     }
 
     setCurrentComponent(newVNode)
     newVNode.__parentDom = parentDom
-
-    if (DEBUG) {
-      console.log(`  🔵 Render: 调用组件 ${describeVNode(newVNode)}`)
-    }
 
     let childVNode
     try {
@@ -134,61 +129,56 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
 
   // ── 原生元素协调（收集 effects，不直接操作 DOM） ──────────
 
-  if(oldVNode == null){
-    if(newVNode == null) return
+  if (oldVNode == null) {
+    if (newVNode == null) return
 
-    // 创建 DOM 子树（这是 Render Phase 的一部分 — createDom 不涉及 DOM 树挂载）
+    // 创建 DOM 子树（Render Phase 的一部分 — 构建 detached 的 DOM 树）
     const dom = mountVNode(newVNode)
 
-    // 收集 PLACEMENT effect（延迟到 Commit Phase 执行 appendChild）
+    // 📦 收集 PLACEMENT effect（延迟到 Commit Phase 执行 appendChild）
     pendingEffects.push({
       type: PLACEMENT,
       dom,
       parentDom,
-      description: `${describeVNode(newVNode)} → ${describeDom(parentDom)}`,
     })
-  }else
-  if(newVNode == null){
-    // 删除节点 — 先递归清理 effects
+  } else
+  if (newVNode == null) {
+    // 删除节点 — 先递归清理副作用
     cleanupEffects(oldVNode)
     const dom = oldVNode.__dom
 
-    // 收集 DELETION effect（延迟到 Commit Phase 执行 removeChild）
+    // 📦 收集 DELETION effect（延迟到 Commit Phase 执行 removeChild）
     pendingEffects.push({
       type: DELETION,
       dom,
       parentDom,
-      description: `${describeVNode(oldVNode)} ← ${describeDom(parentDom)}`,
     })
-  }else
-  if(oldVNode.type !== newVNode.type){
-    // 类型变化 — 清理旧子树 + 创建新子树 + 替换
+  } else
+  if (oldVNode.type !== newVNode.type) {
+    // 类型变化 — 清理旧子树 + 创建新子树
     cleanupEffects(oldVNode)
     const newDom = mountVNode(newVNode)
     const oldDom = oldVNode.__dom
 
-    // 收集 REPLACE effect（延迟到 Commit Phase 执行 replaceChild）
+    // 📦 收集 REPLACE effect（延迟到 Commit Phase 执行 replaceChild）
     pendingEffects.push({
       type: REPLACE,
       newDom,
       oldDom,
       parentDom,
-      description: `${describeVNode(oldVNode)} ⇒ ${describeVNode(newVNode)}`,
     })
-  }else
-  if(oldVNode.type === newVNode.type){
-    if(oldVNode.type === TEXT_ELEMENT){
+  } else
+  if (oldVNode.type === newVNode.type) {
+    if (oldVNode.type === TEXT_ELEMENT) {
       newVNode.__dom = oldVNode.__dom
-      if(oldVNode.props.nodeValue !== newVNode.props.nodeValue){
-        // 收集 UPDATE effect（文本节点内容变化）
+      if (oldVNode.props.nodeValue !== newVNode.props.nodeValue) {
+        // 📦 收集 UPDATE effect（文本节点内容变化）
         pendingEffects.push({
           type: UPDATE,
-          dom: oldVNode.__dom,
           updateFn: () => { oldVNode.__dom.nodeValue = newVNode.props.nodeValue },
-          description: `文本: "${oldVNode.props.nodeValue?.slice(0, 15)}" → "${newVNode.props.nodeValue?.slice(0, 15)}"`,
         })
       }
-    }else{
+    } else {
       newVNode.__dom = oldVNode.__dom
       const oldProps = oldVNode.props
       const newProps = newVNode.props
@@ -201,12 +191,10 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
       )
 
       if (hasPropsChanged) {
-        // 收集 UPDATE effect（属性变化）
+        // 📦 收集 UPDATE effect（属性变化）
         pendingEffects.push({
           type: UPDATE,
-          dom: newVNode.__dom,
           updateFn: () => { updateProps(newVNode.__dom, oldProps, newProps) },
-          description: `${describeVNode(newVNode)} 属性更新`,
         })
       }
 
@@ -225,10 +213,10 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
 function cleanupEffects(vnode) {
   if (!vnode) return
 
-  if(isComponent(vnode)){
+  if (isComponent(vnode)) {
     unmountComponent(vnode)
     cleanupEffects(vnode.__childVNode)
-  }else{
+  } else {
     vnode.props?.children?.forEach(child => cleanupEffects(child))
   }
 }
@@ -247,7 +235,7 @@ function cleanupEffects(vnode) {
  * 那一步由 PLACEMENT effect 在 Commit Phase 完成。
  */
 function mountVNode(vnode) {
-  if(isComponent(vnode)){
+  if (isComponent(vnode)) {
     setCurrentComponent(vnode)
 
     let childVNode
@@ -280,9 +268,9 @@ function mountVNode(vnode) {
 
 function reconcileChildren(parentDom, oldChildren = [], newChildren = []) {
   const hasKey = newChildren.some(child => child.props?.key != null) || oldChildren.some(child => child.props?.key != null)
-  if(hasKey){
+  if (hasKey) {
     reconcileKeyedChildren(parentDom, oldChildren, newChildren)
-  }else{
+  } else {
     reconcileUnkeyedChildren(parentDom, oldChildren, newChildren)
   }
 }
@@ -310,7 +298,7 @@ function reconcileKeyedChildren(parentDom, oldChildren, newChildren) {
   })
   let unkeyedIndex = 0
 
-  // 第一步：递归协调每个新子节点（收集 PLACEMENT / DELETION / UPDATE 等 effects）
+  // 第一步：递归协调每个新子节点（收集 effects）
   newChildren.forEach(newChild => {
     let matchedOld
     if (newChild.props?.key != null) {
@@ -334,8 +322,6 @@ function reconcileKeyedChildren(parentDom, oldChildren, newChildren) {
   }
 
   // 第二步：收集 REORDER effect（按新的期望顺序排列所有子节点 DOM）
-  // 📌 不逐个计算 insertBefore，而是记录完整的期望顺序，
-  //    在 Commit Phase 中一次性按顺序排列。
   const desiredOrder = newChildren
     .map(child => child.__dom || getComponentDom(child))
     .filter(Boolean)
@@ -345,7 +331,6 @@ function reconcileKeyedChildren(parentDom, oldChildren, newChildren) {
       type: REORDER,
       parentDom,
       desiredOrder,
-      description: `${desiredOrder.length} 个子节点重排序`,
     })
   }
 }
@@ -357,123 +342,74 @@ function reconcileKeyedChildren(parentDom, oldChildren, newChildren) {
 /**
  * commitRoot — 提交所有 pending effects 到真实 DOM
  *
+ * TODO: 实现这个函数
+ *
  * 这是 React 的 Commit Phase：
  *   遍历在 Render Phase 中收集的 pendingEffects 数组，
- *   按顺序执行所有 DOM 操作（appendChild、removeChild、replaceChild、updateProps）。
+ *   按顺序执行所有 DOM 操作。
  *
- * 📌 为什么要分两个阶段？
+ * 步骤：
+ *   1. 取出 pendingEffects 并将其重置为空数组（准备下一轮）
+ *      const effects = pendingEffects
+ *      pendingEffects = []
  *
- *   1. **一致性**：Render Phase 可以被中断/重启（React Concurrent Mode），
- *      但 Commit Phase 必须同步完成，保证 DOM 不会处于中间状态。
+ *   2. 如果没有 effects 就直接 return
  *
- *   2. **批量优化**：收集所有变更后一次性应用，减少浏览器重排/重绘。
+ *   3. 遍历 effects 数组，对每个 effect 调用 commitEffect(effect)
  *
- *   3. **可预测性**：effect 列表可以被检查、排序、甚至回滚。
- *
- * 调用时机：
- *   - root.render() 中 reconcile 之后
- *   - root.unmount() 中 reconcile 之后
- *   - hooks.js 的 renderComponent 中 reconcile 之后
+ * 💡 为什么先赋值再重置？
+ *    如果在 commitEffect 过程中触发了新的 reconcile（比如通过 setState），
+ *    新的 effects 会被收集到新的 pendingEffects 数组中，不会和当前这批混在一起。
  */
 export function commitRoot() {
-  const effects = pendingEffects
-  pendingEffects = []  // 重置，准备下一轮
-
-  if (effects.length === 0) return
-
-  if (DEBUG) {
-    console.log('')
-    console.log('%c🟢 ═══ Commit Phase (commitRoot) ═══', 'color: #4ade80; font-weight: bold; font-size: 14px')
-    console.log(`%c   共 ${effects.length} 个 effect 待提交`, 'color: #888')
-  }
-
-  effects.forEach((effect, i) => {
-    commitEffect(effect, i)
-  })
-
-  if (DEBUG) {
-    console.log('%c🟢 ═══ Commit Phase 完成 ═══', 'color: #4ade80; font-weight: bold')
-    console.log('')
-  }
+  // TODO: 实现 commitRoot
+  // 提示：3 行核心逻辑
+  //   1. 保存当前 effects 并重置 pendingEffects
+  //   2. 提前 return 如果没有 effects
+  //   3. 遍历 effects，调用 commitEffect
 }
 
 /**
- * 执行单个 effect — 将变更应用到 DOM
+ * commitEffect — 执行单个 effect，将变更应用到 DOM
+ *
+ * TODO: 实现这个函数
+ *
+ * 根据 effect.type 执行对应的 DOM 操作：
+ *
+ *   ┌──────────────┬────────────────────────────────────────────────┐
+ *   │ Effect Type  │ DOM 操作                                       │
+ *   ├──────────────┼────────────────────────────────────────────────┤
+ *   │ PLACEMENT    │ effect.parentDom.appendChild(effect.dom)       │
+ *   │              │ 将新建的 DOM 子树挂载到父节点                    │
+ *   ├──────────────┼────────────────────────────────────────────────┤
+ *   │ DELETION     │ effect.parentDom.removeChild(effect.dom)       │
+ *   │              │ 从 DOM 树中移除节点                             │
+ *   ├──────────────┼────────────────────────────────────────────────┤
+ *   │ REPLACE      │ effect.parentDom.replaceChild(                 │
+ *   │              │   effect.newDom, effect.oldDom                 │
+ *   │              │ )                                              │
+ *   │              │ 用新节点替换旧节点                              │
+ *   ├──────────────┼────────────────────────────────────────────────┤
+ *   │ UPDATE       │ effect.updateFn()                              │
+ *   │              │ 执行预设的更新函数（更新属性 / nodeValue）       │
+ *   ├──────────────┼────────────────────────────────────────────────┤
+ *   │ REORDER      │ 遍历 effect.desiredOrder，                     │
+ *   │              │ 逐个 insertBefore 确保子节点顺序正确            │
+ *   │              │                                                │
+ *   │              │ desiredOrder.forEach((dom, i) => {             │
+ *   │              │   const current = parentDom.childNodes[i]      │
+ *   │              │   if (dom !== current) {                       │
+ *   │              │     parentDom.insertBefore(dom, current)       │
+ *   │              │   }                                            │
+ *   │              │ })                                             │
+ *   └──────────────┴────────────────────────────────────────────────┘
+ *
+ * 步骤：
+ *   使用 switch (effect.type) 分发到不同的 DOM 操作
+ *
+ * @param {Object} effect - 待执行的 effect 对象
  */
-function commitEffect(effect, index) {
-  const prefix = `   [${index + 1}]`
-
-  switch (effect.type) {
-    case PLACEMENT: {
-      // appendChild — 将新建的 DOM 子树挂载到父节点
-      effect.parentDom.appendChild(effect.dom)
-      if (DEBUG) {
-        console.log(`%c${prefix} ✅ PLACEMENT: ${effect.description}`, 'color: #4ade80')
-      }
-      break
-    }
-
-    case DELETION: {
-      // removeChild — 从 DOM 树中移除节点
-      effect.parentDom.removeChild(effect.dom)
-      if (DEBUG) {
-        console.log(`%c${prefix} 🗑️  DELETION:  ${effect.description}`, 'color: #ef4444')
-      }
-      break
-    }
-
-    case REPLACE: {
-      // replaceChild — 用新节点替换旧节点
-      effect.parentDom.replaceChild(effect.newDom, effect.oldDom)
-      if (DEBUG) {
-        console.log(`%c${prefix} 🔄 REPLACE:   ${effect.description}`, 'color: #f59e0b')
-      }
-      break
-    }
-
-    case UPDATE: {
-      // updateProps / nodeValue — 更新已有节点
-      effect.updateFn()
-      if (DEBUG) {
-        console.log(`%c${prefix} 📝 UPDATE:    ${effect.description}`, 'color: #7c5cff')
-      }
-      break
-    }
-
-    case REORDER: {
-      // 按期望顺序逐个 insertBefore — 确保子节点 DOM 排列正确
-      const { parentDom: parent, desiredOrder } = effect
-      desiredOrder.forEach((dom, i) => {
-        const currentAtPosition = parent.childNodes[i]
-        if (dom !== currentAtPosition) {
-          parent.insertBefore(dom, currentAtPosition || null)
-        }
-      })
-      if (DEBUG) {
-        console.log(`%c${prefix} ↕️  REORDER:   ${effect.description}`, 'color: #06b6d4')
-      }
-      break
-    }
-
-    default:
-      console.warn(`Unknown effect type: ${effect.type}`)
-  }
-}
-
-/**
- * 开始新的 Render Phase 时打日志
- * 供 root.js / hooks.js 调用
- */
-export function logRenderPhaseStart(source) {
-  if (DEBUG) {
-    console.log('')
-    console.log(`%c🔵 ═══ Render Phase 开始 (${source}) ═══`, 'color: #60a5fa; font-weight: bold; font-size: 14px')
-  }
-}
-
-export function logRenderPhaseEnd() {
-  if (DEBUG) {
-    console.log('%c🔵 ═══ Render Phase 完成 ═══', 'color: #60a5fa; font-weight: bold')
-    console.log(`%c   收集到 ${pendingEffects.length} 个 effects`, 'color: #888')
-  }
+function commitEffect(effect) {
+  // TODO: 实现 commitEffect
+  // 提示：switch on effect.type，5 个 case 对应 5 种 DOM 操作
 }

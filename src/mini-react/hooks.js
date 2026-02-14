@@ -72,7 +72,7 @@
  * ============================================================
  */
 
-import { reconcile, commitRoot, logRenderPhaseStart, logRenderPhaseEnd } from './reconciler.js'
+import { reconcile, commitRoot } from './reconciler.js'
 import { getComponentDom } from './component.js'
 
 // ─── 全局 Hook 上下文 ──────────────────────────────────────────
@@ -592,23 +592,18 @@ function flushUpdates() {
 // ─── 组件重渲染 ──────────────────────────────────────────────
 
 /**
- * 重新渲染单个组件（两阶段模型）
+ * 重新渲染单个组件
  *
  * 这是 setState 触发更新的最终落脚点。
+ * 一次调用完成 Phase 1（Render）和 Phase 2（Commit）：
  *
- *   Phase 1: Render Phase
- *     setCurrentComponent → 组件函数执行 → reconcile → 收集 effects
- *     （useState 同步消费 queue，useEffect 排队 effect）
- *
- *   Phase 2: Commit Phase
- *     commitRoot → 批量应用所有 DOM 变更
+ *   Phase 1: setCurrentComponent → 组件函数执行
+ *            （useState 同步消费 queue，useEffect 排队 effect）
+ *   Phase 2: reconcile → DOM 更新
  *
  * @param {Object} component - 组件 VNode
  */
 function renderComponent(component) {
-  // ── Phase 1: Render Phase ──
-  logRenderPhaseStart(`setState → ${component.type.name || 'Anonymous'}`)
-
   setCurrentComponent(component)
   let newChildVNode
   try {
@@ -617,12 +612,10 @@ function renderComponent(component) {
     clearCurrentComponent()
   }
   const parentDom = component.__parentDom
+  // Phase 1: Render Phase — 收集 effects
   reconcile(parentDom, component.__childVNode, newChildVNode)
-  logRenderPhaseEnd()
-
-  // ── Phase 2: Commit Phase ──
+  // Phase 2: Commit Phase — 批量提交 DOM 变更
   commitRoot()
-
   component.__childVNode = newChildVNode
   component.__dom = getComponentDom(newChildVNode)
 }

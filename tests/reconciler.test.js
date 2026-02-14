@@ -1,52 +1,109 @@
 /**
- * Phase 3 测试 — Reconciliation
+ * Phase 3+ 测试 — Reconciliation（两阶段模型）
  *
  * 运行方式：pnpm test
  *
- * 这些测试验证 reconciler 的核心功能：
- * - 新增/删除/替换节点
- * - 属性更新（DOM 复用）
- * - 文本节点更新
- * - 子节点增减
- * - key 驱动的列表协调
- * - createRoot API
+ * 这些测试验证 reconciler 的两阶段架构：
+ *
+ *   Phase 1: Render Phase（reconcile）
+ *     - 遍历 VNode 树，计算 diff
+ *     - 收集 effects 到 pendingEffects 数组
+ *     - ⚠️ 不直接操作 DOM
+ *
+ *   Phase 2: Commit Phase（commitRoot）
+ *     - 遍历 pendingEffects，批量执行 DOM 操作
+ *     - 执行完后清空 pendingEffects
  *
  * @vitest-environment jsdom
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createElement } from '../src/mini-react/createElement.js'
-import { reconcile, commitRoot, setDebugMode } from '../src/mini-react/reconciler.js'
+import { reconcile, commitRoot, getPendingEffects } from '../src/mini-react/reconciler.js'
 import { createRoot } from '../src/mini-react/root.js'
 
-// ─── reconcile 基本场景 ──────────────────────────────────────
+// ─── 两阶段模型验证 ──────────────────────────────────────────
 
-describe('reconcile', () => {
+describe('commitRoot — 两阶段模型', () => {
   let container
 
   beforeEach(() => {
     container = document.createElement('div')
-    setDebugMode(false)  // 测试中关闭调试日志
+  })
+
+  it('reconcile 后 DOM 不变 — effects 仅被收集', () => {
+    const vnode = createElement('p', null, 'Hello')
+
+    // Render Phase：只收集 effects，不操作 DOM
+    reconcile(container, null, vnode)
+
+    // DOM 此时应该是空的（还没 commit）
+    expect(container.childNodes.length).toBe(0)
+    // 但 pendingEffects 中应有 PLACEMENT effect
+    expect(getPendingEffects().length).toBeGreaterThan(0)
+  })
+
+  it('commitRoot 后 DOM 才更新', () => {
+    const vnode = createElement('p', null, 'Hello')
+
+    reconcile(container, null, vnode)
+    expect(container.childNodes.length).toBe(0)  // DOM 未变
+
+    // Commit Phase：执行所有 pending effects
+    commitRoot()
+
+    // DOM 现在已更新
+    expect(container.innerHTML).toBe('<p>Hello</p>')
+    // pendingEffects 已清空
+    expect(getPendingEffects().length).toBe(0)
+  })
+
+  it('commitRoot 执行后 pendingEffects 被清空', () => {
+    const vnode = createElement('div', { id: 'test' }, 'content')
+
+    reconcile(container, null, vnode)
+    expect(getPendingEffects().length).toBeGreaterThan(0)
+
+    commitRoot()
+    expect(getPendingEffects().length).toBe(0)
+  })
+
+  it('没有 pending effects 时 commitRoot 不应报错', () => {
+    expect(() => commitRoot()).not.toThrow()
+    expect(getPendingEffects().length).toBe(0)
+  })
+})
+
+// ─── reconcile + commitRoot 基本场景 ─────────────────────────
+
+describe('reconcile + commitRoot', () => {
+  let container
+
+  beforeEach(() => {
+    container = document.createElement('div')
   })
 
   // ─── 新增节点 ─────────────────────────────────────────────
 
-  it('oldVNode 为 null 时应创建新节点', () => {
+  it('oldVNode 为 null 时应创建新节点（PLACEMENT）', () => {
     const vnode = createElement('p', null, 'Hello')
     reconcile(container, null, vnode)
-    commitRoot()  // Phase 2: 提交 DOM 变更
+    commitRoot()
 
     expect(container.innerHTML).toBe('<p>Hello</p>')
   })
 
   it('两个都为 null 时不应报错', () => {
-    expect(() => reconcile(container, null, null)).not.toThrow()
+    expect(() => {
+      reconcile(container, null, null)
+      commitRoot()
+    }).not.toThrow()
     expect(container.childNodes.length).toBe(0)
   })
 
   // ─── 删除节点 ─────────────────────────────────────────────
 
-  it('newVNode 为 null 时应删除旧节点', () => {
+  it('newVNode 为 null 时应删除旧节点（DELETION）', () => {
     const old = createElement('div', null, 'content')
     reconcile(container, null, old)
     commitRoot()
@@ -59,7 +116,7 @@ describe('reconcile', () => {
 
   // ─── 类型替换 ─────────────────────────────────────────────
 
-  it('类型不同时应替换节点', () => {
+  it('类型不同时应替换节点（REPLACE）', () => {
     const old = createElement('p', null, 'old')
     reconcile(container, null, old)
     commitRoot()
@@ -73,7 +130,7 @@ describe('reconcile', () => {
 
   // ─── 属性更新 ─────────────────────────────────────────────
 
-  it('类型相同时应更新属性而不重建 DOM', () => {
+  it('类型相同时应更新属性而不重建 DOM（UPDATE）', () => {
     const old = createElement('div', { id: 'a', className: 'old' })
     reconcile(container, null, old)
     commitRoot()
@@ -174,12 +231,11 @@ describe('reconcile', () => {
 
 // ─── key 驱动的列表协调 ──────────────────────────────────────
 
-describe('reconcile with keys', () => {
+describe('reconcile with keys + commitRoot', () => {
   let container
 
   beforeEach(() => {
     container = document.createElement('div')
-    setDebugMode(false)
   })
 
   it('key 稳定时应复用 DOM 节点', () => {
@@ -272,7 +328,7 @@ describe('reconcile with keys', () => {
 
 // ─── Root API ────────────────────────────────────────────────
 
-describe('createRoot', () => {
+describe('createRoot (内部调用 reconcile + commitRoot)', () => {
   let container
 
   beforeEach(() => {

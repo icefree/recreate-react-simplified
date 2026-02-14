@@ -27,7 +27,7 @@
  * ============================================================
  */
 
-import { reconcile, commitRoot, logRenderPhaseStart, logRenderPhaseEnd } from './reconciler.js'
+import { reconcile, commitRoot } from './reconciler.js'
 
 // 每个容器最多对应一个 root，WeakMap 避免内存泄漏
 const roots = new WeakMap()
@@ -39,28 +39,26 @@ const roots = new WeakMap()
  * @returns {{ render: Function, unmount: Function }}
  */
 export function createRoot(container) {
-  if(roots.has(container)){
+  if (roots.has(container)) {
     return roots.get(container)
   }
   const root = {
     container,
     currentVNode: null,
-    render(nextVNode){
+    render(nextVNode) {
       // ── Phase 1: Render Phase ──
-      logRenderPhaseStart('root.render')
+      // reconcile 遍历 VNode 树，收集 effects（不操作 DOM）
       reconcile(this.container, this.currentVNode, nextVNode)
-      logRenderPhaseEnd()
 
       // ── Phase 2: Commit Phase ──
+      // commitRoot 批量执行所有 DOM 操作
       commitRoot()
 
       this.currentVNode = nextVNode
     },
-    unmount(){
+    unmount() {
       // ── Phase 1: Render Phase ──
-      logRenderPhaseStart('root.unmount')
       reconcile(this.container, this.currentVNode, null)
-      logRenderPhaseEnd()
 
       // ── Phase 2: Commit Phase ──
       commitRoot()
