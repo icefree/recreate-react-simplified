@@ -16,7 +16,7 @@
  *     │
  *     ├─ Phase 1: Render Phase
  *     │    reconcile(container, currentVNode, nextVNode)
- *     │    → 计算 diff，收集 pendingEffects
+ *     │    → 计算 diff，收集 pendingMutations
  *     │
  *     ├─ Phase 2: Commit Phase
  *     │    commitRoot()

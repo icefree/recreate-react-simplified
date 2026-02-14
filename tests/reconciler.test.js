@@ -7,19 +7,19 @@
  *
  *   Phase 1: Render Phase（reconcile）
  *     - 遍历 VNode 树，计算 diff
- *     - 收集 effects 到 pendingEffects 数组
+ *     - 收集 effects 到 pendingMutations 数组
  *     - ⚠️ 不直接操作 DOM
  *
  *   Phase 2: Commit Phase（commitRoot）
- *     - 遍历 pendingEffects，批量执行 DOM 操作
- *     - 执行完后清空 pendingEffects
+ *     - 遍历 pendingMutations，批量执行 DOM 操作
+ *     - 执行完后清空 pendingMutations
  *
  * @vitest-environment jsdom
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createElement } from '../src/mini-react/createElement.js'
-import { reconcile, commitRoot, getPendingEffects } from '../src/mini-react/reconciler.js'
+import { reconcile, commitRoot, getPendingMutations } from '../src/mini-react/reconciler.js'
 import { createRoot } from '../src/mini-react/root.js'
 
 // ─── 两阶段模型验证 ──────────────────────────────────────────
@@ -39,8 +39,8 @@ describe('commitRoot — 两阶段模型', () => {
 
     // DOM 此时应该是空的（还没 commit）
     expect(container.childNodes.length).toBe(0)
-    // 但 pendingEffects 中应有 PLACEMENT effect
-    expect(getPendingEffects().length).toBeGreaterThan(0)
+    // 但 pendingMutations 中应有 PLACEMENT effect
+    expect(getPendingMutations().length).toBeGreaterThan(0)
   })
 
   it('commitRoot 后 DOM 才更新', () => {
@@ -54,23 +54,23 @@ describe('commitRoot — 两阶段模型', () => {
 
     // DOM 现在已更新
     expect(container.innerHTML).toBe('<p>Hello</p>')
-    // pendingEffects 已清空
-    expect(getPendingEffects().length).toBe(0)
+    // pendingMutations 已清空
+    expect(getPendingMutations().length).toBe(0)
   })
 
-  it('commitRoot 执行后 pendingEffects 被清空', () => {
+  it('commitRoot 执行后 pendingMutations 被清空', () => {
     const vnode = createElement('div', { id: 'test' }, 'content')
 
     reconcile(container, null, vnode)
-    expect(getPendingEffects().length).toBeGreaterThan(0)
+    expect(getPendingMutations().length).toBeGreaterThan(0)
 
     commitRoot()
-    expect(getPendingEffects().length).toBe(0)
+    expect(getPendingMutations().length).toBe(0)
   })
 
   it('没有 pending effects 时 commitRoot 不应报错', () => {
     expect(() => commitRoot()).not.toThrow()
-    expect(getPendingEffects().length).toBe(0)
+    expect(getPendingMutations().length).toBe(0)
   })
 })
 

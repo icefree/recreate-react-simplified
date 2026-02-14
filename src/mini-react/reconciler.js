@@ -12,7 +12,7 @@
  *   │ Phase 1: Render Phase（渲染/协调阶段 — 纯计算）        │
  *   │                                                         │
  *   │  遍历 VNode 树，调用组件函数，计算 diff。               │
- *   │  收集"需要做什么"到 pendingEffects 数组中。              │
+ *   │  收集"需要做什么"到 pendingMutations 数组中。              │
  *   │  ⚠️ 不直接操作 DOM！                                   │
  *   │                                                         │
  *   │  Effect 类型：                                          │
@@ -24,7 +24,7 @@
  *   ├─────────────────────────────────────────────────────────┤
  *   │ Phase 2: Commit Phase（commitRoot — 批量 DOM 变更）     │
  *   │                                                         │
- *   │  遍历 pendingEffects，按顺序执行所有 DOM 操作。         │
+ *   │  遍历 pendingMutations，按顺序执行所有 DOM 操作。         │
  *   │  这一步是同步的、不可中断的。                           │
  *   └─────────────────────────────────────────────────────────┘
  *
@@ -75,13 +75,13 @@ const REORDER   = 'REORDER'    // insertBefore — 重排序
  *     desiredOrder?: Array,    // REORDER 的期望子节点顺序
  *   }
  */
-let pendingEffects = []
+let pendingMutations = []
 
 /**
- * 获取当前 pendingEffects（供测试使用）
+ * 获取当前 pendingMutations（供测试使用）
  */
-export function getPendingEffects() {
-  return pendingEffects
+export function getPendingMutations() {
+  return pendingMutations
 }
 
 // ─── 主入口（Render Phase） ──────────────────────────────────
@@ -89,7 +89,7 @@ export function getPendingEffects() {
 /**
  * 协调单个节点（Render Phase）
  *
- * 对比 oldVNode 与 newVNode，计算 diff，将 DOM 变更收集到 pendingEffects。
+ * 对比 oldVNode 与 newVNode，计算 diff，将 DOM 变更收集到 pendingMutations。
  * ⚠️ 不直接操作 DOM — 所有 DOM 变更延迟到 commitRoot 执行。
  *
  * @param {HTMLElement} parentDom - 父 DOM 节点
@@ -136,7 +136,7 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     const dom = mountVNode(newVNode)
 
     // 📦 收集 PLACEMENT effect（延迟到 Commit Phase 执行 appendChild）
-    pendingEffects.push({
+    pendingMutations.push({
       type: PLACEMENT,
       dom,
       parentDom,
@@ -148,7 +148,7 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     const dom = oldVNode.__dom
 
     // 📦 收集 DELETION effect（延迟到 Commit Phase 执行 removeChild）
-    pendingEffects.push({
+    pendingMutations.push({
       type: DELETION,
       dom,
       parentDom,
@@ -161,7 +161,7 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     const oldDom = oldVNode.__dom
 
     // 📦 收集 REPLACE effect（延迟到 Commit Phase 执行 replaceChild）
-    pendingEffects.push({
+    pendingMutations.push({
       type: REPLACE,
       newDom,
       oldDom,
@@ -173,7 +173,7 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
       newVNode.__dom = oldVNode.__dom
       if (oldVNode.props.nodeValue !== newVNode.props.nodeValue) {
         // 📦 收集 UPDATE effect（文本节点内容变化）
-        pendingEffects.push({
+        pendingMutations.push({
           type: UPDATE,
           updateFn: () => { oldVNode.__dom.nodeValue = newVNode.props.nodeValue },
         })
@@ -192,7 +192,7 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
 
       if (hasPropsChanged) {
         // 📦 收集 UPDATE effect（属性变化）
-        pendingEffects.push({
+        pendingMutations.push({
           type: UPDATE,
           updateFn: () => { updateProps(newVNode.__dom, oldProps, newProps) },
         })
@@ -327,7 +327,7 @@ function reconcileKeyedChildren(parentDom, oldChildren, newChildren) {
     .filter(Boolean)
 
   if (desiredOrder.length > 0) {
-    pendingEffects.push({
+    pendingMutations.push({
       type: REORDER,
       parentDom,
       desiredOrder,
@@ -345,13 +345,13 @@ function reconcileKeyedChildren(parentDom, oldChildren, newChildren) {
  * TODO: 实现这个函数
  *
  * 这是 React 的 Commit Phase：
- *   遍历在 Render Phase 中收集的 pendingEffects 数组，
+ *   遍历在 Render Phase 中收集的 pendingMutations 数组，
  *   按顺序执行所有 DOM 操作。
  *
  * 步骤：
- *   1. 取出 pendingEffects 并将其重置为空数组（准备下一轮）
- *      const effects = pendingEffects
- *      pendingEffects = []
+ *   1. 取出 pendingMutations 并将其重置为空数组（准备下一轮）
+ *      const effects = pendingMutations
+ *      pendingMutations = []
  *
  *   2. 如果没有 effects 就直接 return
  *
@@ -359,12 +359,12 @@ function reconcileKeyedChildren(parentDom, oldChildren, newChildren) {
  *
  * 💡 为什么先赋值再重置？
  *    如果在 commitEffect 过程中触发了新的 reconcile（比如通过 setState），
- *    新的 effects 会被收集到新的 pendingEffects 数组中，不会和当前这批混在一起。
+ *    新的 effects 会被收集到新的 pendingMutations 数组中，不会和当前这批混在一起。
  */
 export function commitRoot() {
   // TODO: 实现 commitRoot
   // 提示：3 行核心逻辑
-  //   1. 保存当前 effects 并重置 pendingEffects
+  //   1. 保存当前 effects 并重置 pendingMutations
   //   2. 提前 return 如果没有 effects
   //   3. 遍历 effects，调用 commitEffect
 }
