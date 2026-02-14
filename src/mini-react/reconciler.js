@@ -116,9 +116,12 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     setCurrentComponent(newVNode)
     newVNode.__parentDom = parentDom
 
-    const childVNode = newVNode.type(newVNode.props)
-
-    clearCurrentComponent()
+    let childVNode
+    try {
+      childVNode = newVNode.type(newVNode.props)
+    } finally {
+      clearCurrentComponent()
+    }
     // TODO (Phase 5): 清除 Hook 上下文
     //
     // 组件函数执行完毕后，清除上下文：
@@ -137,7 +140,7 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     // TODO (Phase 6): 组件被替换为非组件时，清理 effects
     //
     // 当一个函数组件被替换为原生元素时，需要先执行组件的清理：
-    //   unmountComponent(oldVNode)
+    unmountComponent(oldVNode)
     //
     // 然后再解包：
     oldVNode = oldVNode.__childVNode
@@ -154,7 +157,7 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     // TODO (Phase 6): 节点被删除时，执行卸载清理
     //
     // 在 removeChild 之前，递归清理整棵旧子树中的组件 effects：
-    //   unmountVNode(oldVNode)
+    unmountVNode(oldVNode)
     //
     const dom = oldVNode.__dom
     parentDom.removeChild(dom)
@@ -163,7 +166,7 @@ export function reconcile(parentDom, oldVNode, newVNode, index = 0) {
     // TODO (Phase 6): 类型变化时，清理旧节点的 effects
     //
     // 在 replaceChild 之前，递归清理旧子树：
-    //   unmountVNode(oldVNode)
+    unmountVNode(oldVNode)
     //
     const dom = mountVNode(newVNode)
     parentDom.replaceChild(dom, oldVNode.__dom)
@@ -214,6 +217,12 @@ function unmountVNode(vnode) {
   //
   // 💡 提示：实现这个函数后，还需要在 reconcile 中的
   //    3 个位置调用它（见上方的 TODO 注释）
+  if(isComponent(vnode)){
+    unmountComponent(vnode)
+    unmountVNode(vnode.__childVNode)
+  }else{
+    vnode.props?.children?.forEach(child => unmountVNode(child))
+  }
 }
 
 // ─── 挂载（递归创建 DOM） ─────────────────────────────────────
@@ -249,9 +258,12 @@ function mountVNode(vnode) {
   if(isComponent(vnode)){
     setCurrentComponent(vnode)
 
-    const childVNode = vnode.type(vnode.props)
-
-    clearCurrentComponent()
+    let childVNode
+    try {
+      childVNode = vnode.type(vnode.props)
+    } finally {
+      clearCurrentComponent()
+    }
 
     const dom = mountVNode(childVNode)
     vnode.__childVNode = childVNode
@@ -327,6 +339,8 @@ function reconcileKeyedChildren(parentDom, oldChildren, newChildren) {
     }
   })
   let unkeyedIndex = 0
+  // 记录期望的 DOM 顺序，用于正确插入
+  let lastDom = null
   newChildren.forEach(newChild => {
     let matchedOld
     if (newChild.props?.key != null) {
@@ -341,7 +355,14 @@ function reconcileKeyedChildren(parentDom, oldChildren, newChildren) {
     reconcile(parentDom, matchedOld ?? null, newChild, 0)
     // 函数组件的 DOM 需要通过 getComponentDom 获取
     const dom = newChild.__dom || getComponentDom(newChild)
-    if (dom) parentDom.appendChild(dom)
+    if (dom) {
+      // 将节点插入到正确位置：lastDom 的下一个兄弟节点之前
+      const nextSibling = lastDom ? lastDom.nextSibling : parentDom.firstChild
+      if (dom !== nextSibling) {
+        parentDom.insertBefore(dom, nextSibling)
+      }
+      lastDom = dom
+    }
   })
   oldKeyed.forEach(staleChild => {
     reconcile(parentDom, staleChild, null, 0)

@@ -134,6 +134,11 @@ export function clearCurrentComponent() {
  */
 function assertHookContext(hookName) {
   // TODO: 实现 — 检查 currentComponent 是否存在，不存在则抛错
+  if (!currentComponent) {
+    throw new Error(
+      `${hookName} must be called inside a function component (at the top level)`
+    )
+  }
 }
 
 // ─── useState ─────────────────────────────────────────────────
@@ -149,10 +154,13 @@ function assertHookContext(hookName) {
  *   setCount(1)                 // 直接赋值
  *   setCount(prev => prev + 1)  // 函数式更新
  */
+
+function basicStateReducer(state, action) {
+  return typeof action === 'function' ? action(state) : action
+}
+
 export function useState(initialValue) {
-  if (!currentComponent) {
-    throw new Error('useState must be called inside a function component')
-  }
+  assertHookContext('useState')
 
   const component = currentComponent
   const idx = hookIndex++
@@ -254,8 +262,29 @@ export function useState(initialValue) {
  */
 export function useReducer(reducer, initialArg, init) {
   // TODO: 实现 useReducer
+  assertHookContext('useReducer')
+  const component = currentComponent
+  const idx = hookIndex++
+  const oldHook = component.__hooks[idx]
 
-  throw new Error('useReducer is not implemented yet — this is your TODO!')
+  const hook = oldHook ?? {
+    state: init ? init(initialArg) : initialArg,
+    queue: [],
+  }
+
+  hook.queue.forEach(action => {
+    hook.state = reducer(hook.state, action)
+  })
+  hook.queue = []
+  
+  component.__hooks[idx] = hook
+
+  const dispatch = (action) => {
+    hook.queue.push(action)
+    scheduleRerender(component)
+  }
+
+  return [hook.state, dispatch]
 }
 
 // ─── useEffect ────────────────────────────────────────────────
@@ -347,9 +376,43 @@ export function useReducer(reducer, initialArg, init) {
  * @param {Array}     [deps]   - 依赖数组（undefined 表示每次都执行）
  */
 export function useEffect(callback, deps) {
-  // TODO: 实现 useEffect
+  assertHookContext('useEffect')
+  if (typeof callback !== 'function') {
+    throw new Error('callback must be a function')
+  }
+  if (deps && !Array.isArray(deps)) {
+    throw new Error('deps must be an array')
+  }
+  const component = currentComponent
+  const idx = hookIndex++
+  const oldHook = component.__hooks[idx]
 
-  throw new Error('useEffect is not implemented yet — this is your TODO!')
+  const hasChanged = oldHook ? (
+    !deps ||
+    !oldHook.deps ||
+    deps.length !== oldHook.deps.length ||
+    deps.some((dep, i) => !Object.is(dep, oldHook.deps[i])) 
+  ) : true
+  
+  if(hasChanged){
+    component.__hooks[idx] = {
+      tag: 'effect',
+      deps,
+      cleanup: oldHook?.cleanup,
+    }
+    const hookRef = component.__hooks[idx]
+    queueMicrotask(() => {
+      if(hookRef.cleanup){
+        hookRef.cleanup()
+      }
+      const cleanup = callback()
+      hookRef.cleanup = typeof cleanup === 'function' ? cleanup : undefined
+    })
+  }
+  
+  if(!hasChanged){
+    component.__hooks[idx] = oldHook
+  }
 }
 
 // ─── useRef ───────────────────────────────────────────────────
@@ -400,9 +463,17 @@ export function useEffect(callback, deps) {
  * @returns {{ current: * }}
  */
 export function useRef(initialValue) {
-  // TODO: 实现 useRef
+  assertHookContext('useRef')
 
-  throw new Error('useRef is not implemented yet — this is your TODO!')
+  const component = currentComponent
+  const idx = hookIndex++
+  const oldHook = component.__hooks[idx]
+
+  if (!oldHook) {
+    component.__hooks[idx] = { tag: 'ref', current: initialValue }
+  }
+
+  return component.__hooks[idx]
 }
 
 // ─── 组件卸载清理 ──────────────────────────────────────────────
@@ -438,6 +509,13 @@ export function unmountComponent(component) {
   // TODO: 实现组件卸载时的 cleanup
 
   // 暂时为空函数，避免 reconciler 调用时报错
+  if(!component?.__hooks) return
+
+  component.__hooks.forEach(hook => {
+    if (hook?.cleanup && typeof hook.cleanup === 'function') {
+      hook.cleanup()
+    }
+  })
 }
 
 // ─── 重新渲染调度 ─────────────────────────────────────────────
@@ -503,8 +581,12 @@ function flushUpdates() {
  */
 function renderComponent(component) {
   setCurrentComponent(component)
-  const newChildVNode = component.type(component.props)
-  clearCurrentComponent()
+  let newChildVNode
+  try {
+    newChildVNode = component.type(component.props)
+  } finally {
+    clearCurrentComponent()
+  }
   const parentDom = component.__parentDom
   reconcile(parentDom, component.__childVNode, newChildVNode)
   component.__childVNode = newChildVNode
