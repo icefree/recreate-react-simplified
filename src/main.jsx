@@ -1,11 +1,11 @@
 /**
- * Phase 3 Playground — Reconciliation 协调/Diffing
+ * Phase 4 Playground — 函数式组件
  *
- * 🎯 目标：验证 reconciler 的增量更新能力
+ * 🎯 目标：验证函数式组件的核心能力
  *
- * 入口文件直接引入 phase3 playground，
- * Phase 1/2 的代码保留在 main.js / playground 目录中。
+ * 入口文件直接引入 phase4 playground，
+ * 历史阶段代码保留在 main.js / playground 目录中。
  */
 
-// Phase 3: 使用 createRoot + reconcile
-import './playground/phase3.jsx'
+// Phase 4: 函数式组件
+import "./playground/phase4.jsx";
