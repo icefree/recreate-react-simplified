@@ -355,10 +355,10 @@ function reconcileKeyedChildren(parentDom, oldChildren, newChildren) {
  *
  *   2. 如果没有 effects 就直接 return
  *
- *   3. 遍历 effects 数组，对每个 effect 调用 commitEffect(effect)
+ *   3. 遍历 effects 数组，对每个 effect 调用 commitMutation(effect)
  *
  * 💡 为什么先赋值再重置？
- *    如果在 commitEffect 过程中触发了新的 reconcile（比如通过 setState），
+ *    如果在 commitMutation 过程中触发了新的 reconcile（比如通过 setState），
  *    新的 effects 会被收集到新的 pendingMutations 数组中，不会和当前这批混在一起。
  */
 export function commitRoot() {
@@ -366,11 +366,11 @@ export function commitRoot() {
   // 提示：3 行核心逻辑
   //   1. 保存当前 effects 并重置 pendingMutations
   //   2. 提前 return 如果没有 effects
-  //   3. 遍历 effects，调用 commitEffect
+  //   3. 遍历 effects，调用 commitMutation
 }
 
 /**
- * commitEffect — 执行单个 effect，将变更应用到 DOM
+ * commitMutation — 执行单个 effect，将变更应用到 DOM
  *
  * TODO: 实现这个函数
  *
@@ -409,7 +409,7 @@ export function commitRoot() {
  *
  * @param {Object} effect - 待执行的 effect 对象
  */
-function commitEffect(effect) {
-  // TODO: 实现 commitEffect
+function commitMutation(effect) {
+  // TODO: 实现 commitMutation
   // 提示：switch on effect.type，5 个 case 对应 5 种 DOM 操作
 }
