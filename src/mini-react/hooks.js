@@ -16,29 +16,46 @@
  *   每调用一次 Hook（如 useState / useEffect），就在数组中占一个位置（slot）。
  *   这就是为什么 Hook 的调用顺序必须一致 —— **顺序就是 ID**。
  *
- *   渲染流程：
- *   ──────────
- *   1. reconciler 调用组件函数前：
- *      - 设置 currentComponent = 当前组件的 VNode
- *      - 重置 hookIndex = 0
+ *   渲染流程（三阶段模型）：
+ *   ──────────────────────
+ *   React 的更新分为三个阶段，每个 Hook 在不同阶段执行：
  *
- *   2. 组件函数执行时：
- *      - 每调用 useState / useEffect / useRef
- *        → 从 currentComponent.__hooks[hookIndex] 读取已有状态
- *        → 或初始化新状态
- *        → hookIndex++
+ *   ┌─────────────────────────────────────────────────────────┐
+ *   │ Phase 1: Render Phase（渲染阶段 — 同步）                │
+ *   │                                                         │
+ *   │  reconciler 调用组件函数：                                │
+ *   │  1. setCurrentComponent(vnode), hookIndex = 0           │
+ *   │  2. 组件函数执行：                                       │
+ *   │     - useState:  同步消费 queue → 返回最新 state          │
+ *   │     - useReducer: 同步消费 queue → reducer(state, action) │
+ *   │     - useRef:    返回持久化引用（不触发渲染）              │
+ *   │     - useEffect: 检查 deps，若变化则排队 effect           │
+ *   │  3. clearCurrentComponent()                              │
+ *   ├─────────────────────────────────────────────────────────┤
+ *   │ Phase 2: Commit Phase（提交阶段 — 同步）                │
+ *   │                                                         │
+ *   │  reconcile(oldVNode, newVNode) → DOM 增/删/改            │
+ *   ├─────────────────────────────────────────────────────────┤
+ *   │ Phase 3: Passive Effects Phase（副作用阶段 — 异步）      │
+ *   │                                                         │
+ *   │  useEffect 的回调通过 queueMicrotask 延迟到这里执行       │
+ *   │  先 cleanup 旧 effect → 再执行新 effect                  │
+ *   └─────────────────────────────────────────────────────────┘
  *
- *   3. 组件函数执行完毕：
- *      - 检查 hookIndex 是否与上次一致（防止条件调用 Hook）
- *      - 清空 currentComponent = null
+ *   ⚡ 时序保证：
+ *   ───────────
+ *   setState → scheduleRerender → queueMicrotask(flushUpdates)
+ *                                          │
+ *   flushUpdates 执行时（Microtask #1）：    │
+ *     ├─ 调用组件函数（Phase 1 + 2 同步完成）│
+ *     │   └─ useEffect 内部 queueMicrotask(effectFn)  ← 排入队列
+ *     └─ DOM 已更新 ✅                       │
+ *                                          │
+ *   effectFn 执行时（Microtask #2）：        ▼
+ *     └─ DOM 已就绪，可以安全访问 ✅
  *
- *   useEffect 执行时机（Phase 6 重点）：
- *   ────────────────────────────────────
- *   useEffect(callback, deps)
- *     → 组件渲染完成后（DOM 已更新）
- *     → 对比依赖数组是否变化（Object.is 浅比较）
- *     → 如果变化了 → 先执行上次的 cleanup，再执行新的 effect
- *     → 组件卸载时 → 执行最后的 cleanup
+ *   microtask 的 FIFO 特性保证了：
+ *   effect 一定在 render + commit 完成之后才执行。
  *
  *   useRef vs useState 的区别：
  *   ──────────────────────────
@@ -272,6 +289,7 @@ export function useReducer(reducer, initialArg, init) {
     queue: [],
   }
 
+  // 🔵 Render Phase: 同步消费更新队列，计算最新 state
   hook.queue.forEach(action => {
     hook.state = reducer(hook.state, action)
   })
@@ -401,6 +419,8 @@ export function useEffect(callback, deps) {
       cleanup: oldHook?.cleanup,
     }
     const hookRef = component.__hooks[idx]
+    // 🟢 Passive Effects Phase: 用 queueMicrotask 将 effect 推迟到 render + commit 完成之后
+    //    此时 DOM 已更新，可以安全地进行副作用操作（如 DOM 测量、数据请求、订阅等）
     queueMicrotask(() => {
       if(hookRef.cleanup){
         hookRef.cleanup()
@@ -537,23 +557,36 @@ let flushScheduled = false
  * 同一 microtask 内多次 setState 只会触发一次 flush，
  * 这就是 React 的"批处理"（batching）机制。
  *
+ * ⚡ 时序关键点：
+ * queueMicrotask(flushUpdates) 将 render + commit 作为一个 microtask 执行。
+ * 在 flushUpdates 过程中，useEffect 会排入新的 microtask，
+ * 由于 microtask 的 FIFO 特性，effect 一定在 render + commit 之后执行。
+ *
  * @param {Object} component - 需要重渲染的组件 VNode
  */
 export function scheduleRerender(component) {
   dirtyComponents.add(component)
   if (flushScheduled) return
   flushScheduled = true
+  // 调度 Render + Commit Phase（Microtask #1）
   queueMicrotask(flushUpdates)
 }
 
 /**
  * 批量执行所有脏组件的重渲染
+ *
+ * 此函数运行时完成 Phase 1（Render）和 Phase 2（Commit）。
+ * 过程中 useEffect 会通过 queueMicrotask 将 effect 排入队列，
+ * 这些 effect 将在本函数返回后作为后续 microtask 执行（Phase 3）。
  */
 function flushUpdates() {
   flushScheduled = false
   const pending = Array.from(dirtyComponents)
   dirtyComponents.clear()
+  // Phase 1 + 2: 同步执行 render → reconcile → DOM 更新
+  // （此过程中 useEffect 的 callback 被排入 microtask 队列）
   pending.forEach(renderComponent)
+  // ← 函数返回后，microtask 队列中的 effect 才会执行（Phase 3）
 }
 
 // ─── 组件重渲染 ──────────────────────────────────────────────
@@ -562,20 +595,11 @@ function flushUpdates() {
  * 重新渲染单个组件
  *
  * 这是 setState 触发更新的最终落脚点。
- * 设置 Hook 上下文 → 调用组件函数 → reconcile → 清理上下文
+ * 一次调用完成 Phase 1（Render）和 Phase 2（Commit）：
  *
- * 💡 Phase 6 改进建议：
- *    当前代码如果组件函数抛错，clearCurrentComponent() 不会被执行，
- *    会导致 currentComponent 残留，影响后续 Hook 调用。
- *    建议用 try-finally 包裹：
- *
- *    setCurrentComponent(component)
- *    let newChildVNode
- *    try {
- *      newChildVNode = component.type(component.props)
- *    } finally {
- *      clearCurrentComponent()
- *    }
+ *   Phase 1: setCurrentComponent → 组件函数执行
+ *            （useState 同步消费 queue，useEffect 排队 effect）
+ *   Phase 2: reconcile → DOM 更新
  *
  * @param {Object} component - 组件 VNode
  */
