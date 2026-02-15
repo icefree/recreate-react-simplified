@@ -46,24 +46,27 @@ recreate-react-simplified/
 │   │   ├── reconciler.js          # Phase 3: Diff & Patch + 两阶段模型
 │   │   ├── component.js           # Phase 4: 函数式组件运行时
 │   │   ├── hooks.js               # Phase 5-6: Hooks 系统
+│   │   ├── events.js              # Phase 7: 事件委托系统
 │   │   └── index.js               # 统一导出
 │   │
 │   ├── playground/                # 🎮 每阶段的演示应用
 │   │   ├── phase3.jsx
 │   │   ├── phase4.jsx
 │   │   ├── phase5.jsx
-│   │   └── phase6.jsx
+│   │   ├── phase6.jsx
+│   │   └── phase7.jsx
 │   │
 │   ├── main.js                    # Phase 1 入口（纯 JS）
 │   └── main.jsx                   # Phase 2+ 入口（JSX）
 │
-├── tests/                         # 🧪 单元测试（87 个用例）
+├── tests/                         # 🧪 单元测试（111 个用例）
 │   ├── createElement.test.js      # 10 tests
 │   ├── render.test.js             # 8 tests
 │   ├── reconciler.test.js         # 22 tests
 │   ├── component.test.js          # 19 tests
 │   ├── hooks.test.js              # 10 tests
-│   └── useEffect.test.js          # 18 tests
+│   ├── useEffect.test.js          # 18 tests
+│   └── events.test.js             # 24 tests
 │
 ├── docs/                          # 📖 学习资料
 │   └── useState-flow.excalidraw   # useState 流程图
@@ -410,7 +413,7 @@ git log --oneline -- src/mini-react/reconciler.js
 ## ✅ 测试
 
 ```bash
-# 运行全部 87 个测试
+# 运行全部 111 个测试
 pnpm test
 
 # 监听模式（文件变更自动重新运行）
@@ -430,6 +433,7 @@ pnpm vitest run tests/reconciler.test.js
 | `component.test.js`     | 19     | Phase 4    |
 | `hooks.test.js`         | 10     | Phase 5    |
 | `useEffect.test.js`     | 18     | Phase 6    |
+| `events.test.js`        | 24     | Phase 7    |
 
 ---
 

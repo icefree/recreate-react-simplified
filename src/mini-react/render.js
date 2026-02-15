@@ -8,10 +8,15 @@
  * 2. updateProps  — 将 props 差异应用到 DOM 上（支持新增/更新/删除）
  * 3. render       — Phase 1/2 的全量挂载入口（Phase 3 开始由 reconciler 接管）
  *
+ * Phase 7 变更：
+ *   事件处理从直接 addEventListener 改为通过 events.js 的事件委托系统。
+ *   setProp/removeProp 中的 on* 分支需要改用 setEventHandler/removeEventHandler。
+ *
  * ============================================================
  */
 
 import { TEXT_ELEMENT } from './createElement.js'
+import { isEventProp, getEventName, setEventHandler, removeEventHandler } from './events.js'
 
 // ─── DOM 节点创建 ─────────────────────────────────────────────
 
@@ -39,7 +44,7 @@ export function createDom(vnode) {
  * - children    — 跳过，由 reconciler 单独处理
  * - className   — 映射到 dom.className
  * - style       — 对象形式，逐属性 diff
- * - on*         — 事件监听器（先简单处理，Phase 7 改为事件委托）
+ * - on*         — 事件处理器（Phase 7: 通过事件委托，存储到 __eventHandlers）
  * - key         — 跳过，仅供 reconciler 使用
  * - 其他        — 通过 dom[key] 直接赋值
  *
@@ -86,9 +91,24 @@ function setProp(dom, key, value, oldValue) {
     } else {
       dom.style.cssText = value || ''
     }
-  } else if (key.startsWith('on')) {
+  } else if (isEventProp(key)) {
+    // TODO (Phase 7): 改用事件委托
+    //
+    // 旧方式（Phase 1-6）：
+    //   dom.addEventListener(eventName, value)
+    //
+    // 新方式（Phase 7）：
+    //   使用 setEventHandler 将 handler 存储到 dom.__eventHandlers
+    //   事件触发时由 root 上的委托监听器查找并调用
+    //
+    // 步骤：
+    //   1. 用 getEventName(key) 获取事件名（如 'onClick' → 'click'）
+    //   2. 调用 setEventHandler(dom, eventName, value)
+    //
+    // 提示：只需 2 行代码
+
+    // TODO: 替换下面的旧实现
     const eventName = key.slice(2).toLowerCase()
-    // 移除旧事件，绑定新事件
     if (oldValue) {
       dom.removeEventListener(eventName, oldValue)
     }
@@ -107,7 +127,16 @@ function removeProp(dom, key, oldValue) {
     dom.className = ''
   } else if (key === 'style') {
     dom.style.cssText = ''
-  } else if (key.startsWith('on')) {
+  } else if (isEventProp(key)) {
+    // TODO (Phase 7): 改用事件委托的移除方式
+    //
+    // 步骤：
+    //   1. 用 getEventName(key) 获取事件名
+    //   2. 调用 removeEventHandler(dom, eventName)
+    //
+    // 提示：只需 2 行代码
+
+    // TODO: 替换下面的旧实现
     const eventName = key.slice(2).toLowerCase()
     dom.removeEventListener(eventName, oldValue)
   } else {

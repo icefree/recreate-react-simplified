@@ -28,6 +28,7 @@
  */
 
 import { reconcile, commitRoot } from './reconciler.js'
+import { setupEventDelegation } from './events.js'
 
 // 每个容器最多对应一个 root，WeakMap 避免内存泄漏
 const roots = new WeakMap()
@@ -42,6 +43,22 @@ export function createRoot(container) {
   if (roots.has(container)) {
     return roots.get(container)
   }
+
+  // TODO (Phase 7): 初始化事件委托系统
+  //
+  // 在 root 创建时调用 setupEventDelegation(container)，
+  // 让 container 成为所有事件的委托目标。
+  //
+  // 只需一行代码：
+  //   setupEventDelegation(container)
+  //
+  // 💡 这一步确保了：
+  //    - 所有 on* 事件处理器不再直接绑定到各个元素
+  //    - 而是在 root 容器上统一监听，通过冒泡找到目标
+
+  // TODO: 取消下面这行的注释
+  // setupEventDelegation(container)
+
   const root = {
     container,
     currentVNode: null,

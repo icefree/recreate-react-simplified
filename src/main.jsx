@@ -1,11 +1,11 @@
 /**
- * Phase 6 Playground — useEffect / useRef / useReducer
+ * Phase 7 Playground — 事件委托系统
  *
- * 🎯 目标：验证副作用管理、持久化引用、复杂状态管理
+ * 🎯 目标：验证事件委托、冒泡行为、多事件类型支持
  *
- * 入口文件直接引入 phase6 playground，
+ * 入口文件直接引入 phase7 playground，
  * 历史阶段代码保留在 playground 目录中。
  */
 
-// Phase 6: useEffect / useRef / useReducer
-import "./playground/phase6.jsx";
+// Phase 7: 事件委托系统
+import "./playground/phase7.jsx";

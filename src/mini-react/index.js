@@ -11,6 +11,7 @@ import { reconcile, commitRoot } from './reconciler.js'
 import { createRoot } from './root.js'
 import { isComponent, getComponentDom } from './component.js'
 import { useState, useEffect, useRef, useReducer } from './hooks.js'
+import { isEventProp, getEventName, setupEventDelegation, setEventHandler, removeEventHandler } from './events.js'
 
 const MiniReact = {
   createElement,
@@ -26,8 +27,13 @@ const MiniReact = {
   useEffect,
   useRef,
   useReducer,
+  isEventProp,
+  getEventName,
+  setupEventDelegation,
+  setEventHandler,
+  removeEventHandler,
   TEXT_ELEMENT,
 }
 
-export { createElement, render, createRoot, reconcile, commitRoot, createDom, updateProps, isComponent, getComponentDom, useState, useEffect, useRef, useReducer, TEXT_ELEMENT }
+export { createElement, render, createRoot, reconcile, commitRoot, createDom, updateProps, isComponent, getComponentDom, useState, useEffect, useRef, useReducer, isEventProp, getEventName, setupEventDelegation, setEventHandler, removeEventHandler, TEXT_ELEMENT }
 export default MiniReact
