@@ -1,11 +1,11 @@
 /**
- * Phase 7 Playground — 事件委托系统
+ * Phase 7b Playground — Context API 与 Memoization Hooks
  *
- * 🎯 目标：验证事件委托、冒泡行为、多事件类型支持
+ * 🎯 目标：验证 Context 跨层级传值、useMemo/useCallback/memo 性能优化
  *
- * 入口文件直接引入 phase7 playground，
+ * 入口文件直接引入 phase7b playground，
  * 历史阶段代码保留在 playground 目录中。
  */
 
-// Phase 7: 事件委托系统
-import "./playground/phase7.jsx";
+// Phase 7b: Context API & Memoization Hooks
+import "./playground/phase7b.jsx";
