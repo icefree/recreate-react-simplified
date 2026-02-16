@@ -210,8 +210,12 @@ export function memo(Component, areEqual) {
     const prevProps = MemoComponent.__prevMemoProps
     const prevResult = MemoComponent.__prevMemoResult
     
-    if(prevProps && (areEqual ? areEqual(prevProps, compareProps) : shallowEqual(prevProps, compareProps))){
-      return prevResult
+    // 有缓存时才做比较
+    if (prevProps) {
+      const compare = areEqual || shallowEqual
+      if (compare(prevProps, compareProps)) {
+        return prevResult
+      }
     }
     
     const result = Component(props)
