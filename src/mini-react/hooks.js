@@ -541,6 +541,8 @@ export function useRef(initialValue) {
 export function useContext(context) {
   // TODO: 实现 useContext
   // 提示：校验 Hook 上下文 → 返回 context._currentValue
+  assertHookContext('useContext')
+  return context._currentValue
 }
 
 // ─── useMemo ──────────────────────────────────────────────────
@@ -596,6 +598,28 @@ export function useContext(context) {
 export function useMemo(factory, deps) {
   // TODO: 实现 useMemo
   // 提示：校验 → 比较 deps → 变化则重新计算 → 未变则返回缓存
+  assertHookContext('useMemo')
+  const component = currentComponent
+  const idx = hookIndex++
+  const oldHook = component.__hooks[idx]
+
+  if (!oldHook) {
+    const value = factory()
+    component.__hooks[idx] = { tag: 'memo', value, deps }
+    return value
+  }
+
+  const hasChanged = oldHook
+    ? !deps || deps.some((dep, i) => !Object.is(dep, oldHook.deps[i]))
+    : true
+
+  if (hasChanged) {
+    const value = factory()
+    component.__hooks[idx] = { tag: 'memo', value, deps }
+    return value
+  }
+
+  return oldHook.value
 }
 
 // ─── useCallback ──────────────────────────────────────────────
@@ -641,6 +665,7 @@ export function useMemo(factory, deps) {
 export function useCallback(callback, deps) {
   // TODO: 实现 useCallback
   // 提示：直接委托给 useMemo(() => callback, deps)
+  return useMemo(() => callback, deps)
 }
 
 // ─── 组件卸载清理 ──────────────────────────────────────────────

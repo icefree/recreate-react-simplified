@@ -76,6 +76,19 @@
 export function createContext(defaultValue) {
   // TODO: 实现 createContext
   // 提示：创建 context 对象 → 实现 Provider 组件 → 返回 context
+  const context = {
+    _defaultValue: defaultValue,
+    _currentValue: defaultValue,
+    Provider: null,
+  }
+
+  context.Provider = function ContextProvider({ value, children }) {
+    context._currentValue = value
+    // children 是数组（来自 createElement），简化版只支持单子元素
+    return Array.isArray(children) ? children[0] : children
+  }
+
+  return context
 }
 
 // ─── shallowEqual ──────────────────────────────────────────────
@@ -88,7 +101,7 @@ export function createContext(defaultValue) {
  * 📚 核心原理：
  *
  *   浅比较 ≠ 深比较：
- *   - 浅比较只比较对象的第一层属性值（用 Object.is）
+ *   - 浅比较会遍历对象的第一层属性，对每个属性值使用 Object.is() 进行比较
  *   - 深比较会递归比较所有嵌套层级
  *   - React 的 memo 使用浅比较，因为深比较性能开销太大
  *
@@ -118,6 +131,18 @@ export function createContext(defaultValue) {
 export function shallowEqual(objA, objB) {
   // TODO: 实现 shallowEqual
   // 提示：Object.is → 类型检查 → keys 数量 → 逐 key 比较
+  if(Object.is(objA, objB)){
+    return true
+  }
+  if(typeof objA !== 'object' || objA === null || typeof objB !== 'object' || objB === null){
+    return false
+  }
+  const keysA = Object.keys(objA)
+  const keysB = Object.keys(objB)
+  if(keysA.length !== keysB.length){
+    return false
+  }
+  return keysA.every(key => Object.is(objA[key], objB[key]))
 }
 
 // ─── memo ──────────────────────────────────────────────────────
@@ -178,4 +203,22 @@ export function shallowEqual(objA, objB) {
 export function memo(Component, areEqual) {
   // TODO: 实现 memo
   // 提示：创建包装组件 → 比较 props → 相等则返回缓存 → 不等则重新计算
+  const MemoComponent = function(props){
+    // 剥离 children — createElement 每次生成新的 children 数组引用，
+    // 直接比较会导致 shallowEqual 永远返回 false
+    const { children: _, ...compareProps } = props
+    const prevProps = MemoComponent.__prevMemoProps
+    const prevResult = MemoComponent.__prevMemoResult
+    
+    if(prevProps && (areEqual ? areEqual(prevProps, compareProps) : shallowEqual(prevProps, compareProps))){
+      return prevResult
+    }
+    
+    const result = Component(props)
+    MemoComponent.__prevMemoProps = compareProps
+    MemoComponent.__prevMemoResult = result
+    return result
+  }
+
+  return MemoComponent
 }
