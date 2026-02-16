@@ -70,6 +70,7 @@
  */
 export function isEventProp(name) {
   // TODO: 实现这个函数（1 行）
+  return name.startsWith("on");
 }
 
 /**
@@ -97,6 +98,7 @@ export function isEventProp(name) {
  */
 export function getEventName(propName) {
   // TODO: 实现这个函数（1 行）
+  return propName.slice(2).toLowerCase();
 }
 
 // ─── 事件委托核心 ────────────────────────────────────────────
@@ -179,6 +181,24 @@ export function setupEventDelegation(rootContainer) {
   //   3. 每个 eventType 注册一个 addEventListener
   //   4. 监听器内部从 event.target 向上遍历到 rootContainer
   //   5. 标记 __eventsInitialized = true
+  if (rootContainer.__eventsInitialized) {
+    return;
+  }
+
+  DELEGATED_EVENTS.forEach(event => {
+    rootContainer.addEventListener(event, (nativeEvent) => {
+      let target = nativeEvent.target;
+      while (target && target !== rootContainer) {
+        const handler = target.__eventHandlers?.[event];
+        if (handler) {
+          handler(nativeEvent);
+        }
+        target = target.parentNode;
+      }
+    })
+  })
+
+  rootContainer.__eventsInitialized = true;
 }
 
 // ─── DOM 节点事件处理器存储 ──────────────────────────────────
@@ -201,6 +221,10 @@ export function setupEventDelegation(rootContainer) {
  */
 export function setEventHandler(dom, eventType, handler) {
   // TODO: 实现这个函数（2 行）
+  if (!dom.__eventHandlers) {
+    dom.__eventHandlers = {};
+  }
+  dom.__eventHandlers[eventType] = handler;
 }
 
 /**
@@ -216,4 +240,7 @@ export function setEventHandler(dom, eventType, handler) {
  */
 export function removeEventHandler(dom, eventType) {
   // TODO: 实现这个函数（1 行）
+  if (dom.__eventHandlers) {
+    delete dom.__eventHandlers[eventType];
+  }
 }

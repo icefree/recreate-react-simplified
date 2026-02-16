@@ -57,7 +57,7 @@ export function createRoot(container) {
   //    - 而是在 root 容器上统一监听，通过冒泡找到目标
 
   // TODO: 取消下面这行的注释
-  // setupEventDelegation(container)
+  setupEventDelegation(container)
 
   const root = {
     container,

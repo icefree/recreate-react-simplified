@@ -108,11 +108,11 @@ function setProp(dom, key, value, oldValue) {
     // 提示：只需 2 行代码
 
     // TODO: 替换下面的旧实现
-    const eventName = key.slice(2).toLowerCase()
+    const eventName = getEventName(key)
     if (oldValue) {
-      dom.removeEventListener(eventName, oldValue)
+      removeEventHandler(dom, eventName)
     }
-    dom.addEventListener(eventName, value)
+    setEventHandler(dom, eventName, value)
   } else {
     // nodeValue、id 等常规属性
     dom[key] = value
@@ -137,8 +137,8 @@ function removeProp(dom, key, oldValue) {
     // 提示：只需 2 行代码
 
     // TODO: 替换下面的旧实现
-    const eventName = key.slice(2).toLowerCase()
-    dom.removeEventListener(eventName, oldValue)
+    const eventName = getEventName(key)
+    removeEventHandler(dom, eventName)
   } else {
     dom[key] = ''
   }
