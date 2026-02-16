@@ -1461,6 +1461,186 @@ function handleError(root, thrownValue) {
 }
 ```
 
+#### 9.6 作用域化的 Context 传播（Scoped Context Propagation）
+
+Phase 7b 的简化版 Context 用全局 `_currentValue` 实现，存在三个根本缺陷：
+
+1. **无作用域**：同一个 Context 的多个 Provider 共享同一个 `_currentValue`，后者覆盖前者
+2. **无精确通知**：Provider 值变化时，无法精确标记消费了该 Context 的组件，只能依赖整棵树重渲染
+3. **无嵌套支持**：嵌套的 Provider 无法形成"就近取值"的作用域链
+
+真实 React 通过 Fiber 树解决了全部三个问题。
+
+##### 9.6.1 Context 值的栈式管理
+
+Provider 在 Fiber 树中形成一个**值栈**，`beginWork` 进入 Provider 时压栈，`completeWork` 离开时弹栈：
+
+```js
+// Context 值栈 —— 支持嵌套 Provider
+const valueStack = [];
+let index = -1;
+
+function pushProvider(context, nextValue) {
+  index++;
+  valueStack[index] = context._currentValue; // 保存旧值
+  context._currentValue = nextValue; // 设置新值
+}
+
+function popProvider(context) {
+  context._currentValue = valueStack[index]; // 恢复旧值
+  valueStack[index] = null;
+  index--;
+}
+```
+
+在 `beginWork` 和 `completeWork` 中配合使用：
+
+```js
+// beginWork — 处理 Provider 类型的 Fiber
+function updateContextProvider(current, workInProgress) {
+  const context = workInProgress.type._context;
+  const newValue = workInProgress.pendingProps.value;
+
+  // 压栈：进入 Provider 的作用域
+  pushProvider(context, newValue);
+
+  // 检查值是否变化
+  if (current !== null) {
+    const oldValue = current.memoizedProps.value;
+    if (Object.is(oldValue, newValue)) {
+      // 值没变 → 可能可以 Bailout（但仍需检查子树）
+    } else {
+      // 值变了 → 精确通知消费者
+      propagateContextChange(workInProgress, context, newValue);
+    }
+  }
+
+  reconcileChildren(
+    current,
+    workInProgress,
+    workInProgress.pendingProps.children,
+  );
+  return workInProgress.child;
+}
+
+// completeWork — 离开 Provider 时弹栈
+function completeWork(current, workInProgress) {
+  if (workInProgress.tag === ContextProvider) {
+    const context = workInProgress.type._context;
+    popProvider(context); // 恢复上一层的值
+  }
+  // ... 其他 tag 的处理
+}
+```
+
+这样，嵌套 Provider 就能正确工作了：
+
+```
+<ThemeContext.Provider value="dark">      ← pushProvider("dark")
+  <Sidebar />                             ← useContext → "dark" ✅
+  <ThemeContext.Provider value="light">    ← pushProvider("light")
+    <MainContent />                       ← useContext → "light" ✅
+  </ThemeContext.Provider>                 ← popProvider → 恢复 "dark"
+  <Footer />                              ← useContext → "dark" ✅
+</ThemeContext.Provider>                   ← popProvider → 恢复 defaultValue
+```
+
+##### 9.6.2 精确通知消费者（propagateContextChange）
+
+当 Provider 值变化时，React 不会盲目重渲染所有子组件，而是**精确地**扫描 Fiber 子树，找到所有消费了该 Context 的 Fiber，将它们标记为需要更新：
+
+```js
+function propagateContextChange(workInProgress, context, newValue) {
+  // 深度优先遍历 Provider 下的整个 Fiber 子树
+  let fiber = workInProgress.child;
+
+  while (fiber !== null) {
+    // 检查此 Fiber 是否消费了该 Context
+    let dependency = fiber.dependencies;
+    if (dependency !== null) {
+      let dep = dependency.firstContext;
+      while (dep !== null) {
+        if (dep.context === context) {
+          // 🎯 找到了消费者！标记为需要更新
+          fiber.flags |= ForceUpdate;
+
+          // 沿 return 链向上，标记所有祖先的 childLanes
+          // 确保 Bailout 不会跳过这条路径
+          let parent = fiber.return;
+          while (parent !== null) {
+            parent.childLanes = mergeLanes(parent.childLanes, renderLanes);
+            parent = parent.return;
+          }
+          break;
+        }
+        dep = dep.next;
+      }
+    }
+
+    // 继续遍历子树（深度优先）
+    if (fiber.child !== null) {
+      fiber.child.return = fiber;
+      fiber = fiber.child;
+    } else {
+      // 回溯到下一个兄弟节点
+      while (fiber !== null) {
+        if (fiber === workInProgress) return; // 回到 Provider，结束
+        if (fiber.sibling !== null) {
+          fiber = fiber.sibling;
+          break;
+        }
+        fiber = fiber.return;
+      }
+    }
+  }
+}
+```
+
+##### 9.6.3 readContext —— useContext 的底层实现
+
+`useContext` 在真实 React 中不是基于 hookIndex 的 Hook，而是直接调用 `readContext`，并在 Fiber 上注册依赖：
+
+```js
+function readContext(context) {
+  const value = context._currentValue;
+
+  // 在当前 Fiber 上记录"我消费了这个 Context"
+  // 这样 propagateContextChange 才能找到我
+  const contextItem = {
+    context: context,
+    next: null,
+  };
+
+  if (lastContextDependency === null) {
+    // 首个依赖
+    currentlyRenderingFiber.dependencies = {
+      firstContext: contextItem,
+    };
+  } else {
+    // 追加到链表末尾
+    lastContextDependency.next = contextItem;
+  }
+  lastContextDependency = contextItem;
+
+  return value;
+}
+```
+
+##### 9.6.4 简化版 vs 完整版对比
+
+```
+┌────────────────────┬─────────────────────────┬──────────────────────────────┐
+│                    │ Phase 7b 简化版          │ Phase 9 Fiber 完整版          │
+├────────────────────┼─────────────────────────┼──────────────────────────────┤
+│ 值存储              │ 全局 _currentValue       │ 值栈 + push/pop              │
+│ 嵌套 Provider      │ ❌ 后者覆盖前者          │ ✅ 就近取值                   │
+│ 值变化通知          │ ❌ 依赖整棵树重渲染      │ ✅ propagateContextChange     │
+│ Consumer 追踪      │ ❌ 无法追踪              │ ✅ fiber.dependencies 链表    │
+│ Bailout 协同       │ ❌ 不参与                │ ✅ childLanes 标记路径        │
+│ 实现复杂度          │ ~10 行                   │ ~200 行                      │
+└────────────────────┴─────────────────────────┴──────────────────────────────┘
+```
+
 ### ✅ 验证标准
 
 - [ ] 能够解释 FiberRootNode 和 HostRootFiber 的区别
@@ -1472,7 +1652,11 @@ function handleError(root, thrownValue) {
 - [ ] subtreeFlags 冒泡机制正确工作
 - [ ] 实现 `alternate` 机制，复用旧 Fiber 节点
 - [ ] Error Boundary 能捕获子树中的渲染错误并显示 fallback
+- [ ] Context 值栈正确支持嵌套 Provider（push/pop）
+- [ ] `propagateContextChange` 能精确找到消费了特定 Context 的 Fiber
+- [ ] Consumer Fiber 的 `dependencies` 链表正确记录 Context 依赖
 - [ ] Demo：大列表 + React.memo，验证 Bailout 减少了不必要的 beginWork 调用
+- [ ] Demo：嵌套 Provider + 精确更新，验证只有消费者被重渲染
 
 ### 🔗 React 源码参考
 
@@ -1480,6 +1664,7 @@ function handleError(root, thrownValue) {
 - [`react-reconciler/src/ReactFiberCompleteWork.js`](https://github.com/facebook/react/blob/main/packages/react-reconciler/src/ReactFiberCompleteWork.js) — completeWork 主逻辑
 - [`react-reconciler/src/ReactFiberWorkLoop.js`](https://github.com/facebook/react/blob/main/packages/react-reconciler/src/ReactFiberWorkLoop.js) — Work Loop 主循环
 - [`react-reconciler/src/ReactFiberThrow.js`](https://github.com/facebook/react/blob/main/packages/react-reconciler/src/ReactFiberThrow.js) — 错误处理
+- [`react-reconciler/src/ReactFiberNewContext.js`](https://github.com/facebook/react/blob/main/packages/react-reconciler/src/ReactFiberNewContext.js) — Context 在 Fiber 树中的传播机制（propagateContextChange、readContext）
 
 ---
 
