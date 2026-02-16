@@ -143,8 +143,8 @@ git log --oneline --all
 | `d49849d` | 🏗️ Phase 6 骨架 — useEffect/useRef/useReducer（含 TODO）     | Phase 6  |
 | `b632a13` | ✅ Phase 6 实现 — 副作用管理                                 | Phase 6  |
 | `8d8236f` | 🔄 重构 — 拆分为两阶段模型（Render + Commit）                | 进阶     |
-| `...`     | 🏗️ Phase 7 骨架 — 事件委托系统（含 TODO）                    | Phase 7  |
-| `...`     | ✅ Phase 7 实现 — 事件委托 + 24 个测试通过                   | Phase 7  |
+| `65c5c9b` | 🏗️ Phase 7 骨架 — 事件委托系统（含 TODO）                    | Phase 7  |
+| `ada0726` | ✅ Phase 7 实现 — 事件委托 + 24 个测试通过                   | Phase 7  |
 | `1073c56` | 🏗️ Phase 7b 骨架 — Context API & Memoization（含 TODO）      | Phase 7b |
 | `60ef6b4` | ✅ Phase 7b 实现 — Context/memo/useMemo/useCallback 26 tests | Phase 7b |
 
