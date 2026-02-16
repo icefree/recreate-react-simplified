@@ -1,6 +1,7 @@
 /**
  * ============================================================
  * Mini-React: hooks — useState / useEffect / useRef / useReducer
+ *                     useContext / useMemo / useCallback
  * ============================================================
  *
  * 🎯 核心职责：
@@ -494,6 +495,152 @@ export function useRef(initialValue) {
   }
 
   return component.__hooks[idx]
+}
+
+// ─── useContext ────────────────────────────────────────────────
+
+/**
+ * useContext Hook — 读取 Context 的当前值
+ *
+ * TODO (Phase 7b): 实现 useContext
+ *
+ * 📚 核心原理：
+ *
+ *   useContext 让组件可以"订阅"一个 Context，读取最近的 Provider 提供的值。
+ *   如果没有 Provider，则返回 createContext 时传入的 defaultValue。
+ *
+ *   简化版实现：
+ *   ──────────
+ *   由于我们的 Context 使用全局 _currentValue，useContext 只需：
+ *   1. 校验 Hook 上下文
+ *   2. 返回 context._currentValue
+ *
+ *   就这么简单！但这意味着我们的 Context 有局限：
+ *   - 不能精确追踪哪些组件消费了 Context
+ *   - Provider 值变化时依赖父组件重渲染来触发子组件更新
+ *
+ *   真实 React 的做法：
+ *   - 在 beginWork 阶段调用 prepareToReadContext
+ *   - Provider 变化时用 propagateContextChange 遍历 Fiber 子树
+ *   - 只标记实际消费了该 Context 的 Fiber 为脏节点
+ *
+ *   💡 注意：useContext 不占用 hookIndex！
+ *      在真实 React 中，useContext 不是基于索引的 Hook，
+ *      它直接读取 Context 值，不在 __hooks 数组中占位。
+ *      但为了我们的简化实现保持一致性，可以选择：
+ *      方案 A：不递增 hookIndex（推荐，更接近真实 React）
+ *      方案 B：递增 hookIndex 并存储（更一致但不必要）
+ *
+ * 步骤：
+ *   1. assertHookContext('useContext')
+ *   2. return context._currentValue
+ *
+ * @param {{ _currentValue: *, _defaultValue: * }} context - createContext 返回的对象
+ * @returns {*} 当前 Context 值
+ */
+export function useContext(context) {
+  // TODO: 实现 useContext
+  // 提示：校验 Hook 上下文 → 返回 context._currentValue
+}
+
+// ─── useMemo ──────────────────────────────────────────────────
+
+/**
+ * useMemo Hook — 缓存计算结果
+ *
+ * TODO (Phase 7b): 实现 useMemo
+ *
+ * 📚 核心原理：
+ *
+ *   useMemo 在 deps 不变时跳过 factory() 执行，直接返回缓存值。
+ *   这对于昂贵的计算特别有用（例如列表过滤、排序、格式化）。
+ *
+ *   工作方式：
+ *   ────────
+ *   首次渲染：执行 factory()，缓存结果和 deps
+ *   后续渲染：
+ *     - deps 与上次相同 → 返回缓存值（跳过 factory）
+ *     - deps 变化了 → 重新执行 factory()，更新缓存
+ *
+ *   与 useEffect 的 deps 比较完全一致（用 Object.is 逐项比较）
+ *
+ *   ⚠️ 注意：useMemo 不保证缓存永远存在
+ *   React 文档明确说明，useMemo 可能在内存压力下丢弃缓存。
+ *   所以 useMemo 应该用于性能优化，而不是语义正确性。
+ *
+ * 步骤：
+ *   1. assertHookContext('useMemo')
+ *
+ *   2. 捕获上下文：
+ *      const component = currentComponent
+ *      const idx = hookIndex++
+ *      const oldHook = component.__hooks[idx]
+ *
+ *   3. 判断 deps 是否变化（与 useEffect 一致）：
+ *      const hasChanged = oldHook
+ *        ? !deps || deps.some((dep, i) => !Object.is(dep, oldHook.deps[i]))
+ *        : true
+ *
+ *   4. 如果变化了：
+ *      const value = factory()
+ *      component.__hooks[idx] = { tag: 'memo', value, deps }
+ *      return value
+ *
+ *   5. 如果没变化：
+ *      return oldHook.value
+ *
+ * @param {Function} factory - 计算函数，返回要缓存的值
+ * @param {Array} deps - 依赖数组
+ * @returns {*} 缓存的值或新计算的值
+ */
+export function useMemo(factory, deps) {
+  // TODO: 实现 useMemo
+  // 提示：校验 → 比较 deps → 变化则重新计算 → 未变则返回缓存
+}
+
+// ─── useCallback ──────────────────────────────────────────────
+
+/**
+ * useCallback Hook — 缓存函数引用
+ *
+ * TODO (Phase 7b): 实现 useCallback
+ *
+ * 📚 核心原理：
+ *
+ *   useCallback 是 useMemo 的语法糖！
+ *   useCallback(fn, deps) === useMemo(() => fn, deps)
+ *
+ *   为什么需要它？
+ *   ─────────────
+ *   在 React 中，每次组件渲染都会创建新的函数：
+ *
+ *     function Parent() {
+ *       const handleClick = () => { ... }  // 每次渲染都是新引用！
+ *       return <Child onClick={handleClick} />
+ *     }
+ *
+ *   如果 Child 被 memo() 包裹，每次 handleClick 都是新引用，
+ *   导致 memo 的浅比较永远判定 props 不同，memo 失效。
+ *
+ *   解决方案：
+ *     const handleClick = useCallback(() => { ... }, [dep1])
+ *     // deps 不变时，handleClick 保持同一引用
+ *
+ * 步骤：
+ *   实现非常简单，直接委托给 useMemo：
+ *   return useMemo(() => callback, deps)
+ *
+ *   💡 这里的 () => callback 不是在"执行" callback，
+ *      而是创建一个"返回 callback 的工厂函数"交给 useMemo。
+ *      useMemo 缓存的就是 callback 本身。
+ *
+ * @param {Function} callback - 要缓存的回调函数
+ * @param {Array} deps - 依赖数组
+ * @returns {Function} 缓存的函数引用
+ */
+export function useCallback(callback, deps) {
+  // TODO: 实现 useCallback
+  // 提示：直接委托给 useMemo(() => callback, deps)
 }
 
 // ─── 组件卸载清理 ──────────────────────────────────────────────
