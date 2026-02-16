@@ -12,6 +12,9 @@
 - 函数式组件
 - Hooks（`useState`、`useEffect`、`useRef`、`useReducer`）
 - 两阶段模型（Render Phase + Commit Phase）
+- 事件委托系统
+- Context API（`createContext` + `useContext`）
+- Memoization（`useMemo` / `useCallback` / `React.memo`）
 
 每个阶段都有独立的测试用例和 Playground 演示，你可以通过 git 历史**逐步回溯**，跟随每一步的思路亲手实现。
 
@@ -45,8 +48,9 @@ recreate-react-simplified/
 │   │   ├── root.js                # Phase 3: createRoot API
 │   │   ├── reconciler.js          # Phase 3: Diff & Patch + 两阶段模型
 │   │   ├── component.js           # Phase 4: 函数式组件运行时
-│   │   ├── hooks.js               # Phase 5-6: Hooks 系统
+│   │   ├── hooks.js               # Phase 5-7b: Hooks 系统
 │   │   ├── events.js              # Phase 7: 事件委托系统
+│   │   ├── context.js             # Phase 7b: Context API + memo
 │   │   └── index.js               # 统一导出
 │   │
 │   ├── playground/                # 🎮 每阶段的演示应用
@@ -54,19 +58,21 @@ recreate-react-simplified/
 │   │   ├── phase4.jsx
 │   │   ├── phase5.jsx
 │   │   ├── phase6.jsx
-│   │   └── phase7.jsx
+│   │   ├── phase7.jsx
+│   │   └── phase7b.jsx
 │   │
 │   ├── main.js                    # Phase 1 入口（纯 JS）
 │   └── main.jsx                   # Phase 2+ 入口（JSX）
 │
-├── tests/                         # 🧪 单元测试（111 个用例）
+├── tests/                         # 🧪 单元测试（144 个用例）
 │   ├── createElement.test.js      # 10 tests
 │   ├── render.test.js             # 8 tests
 │   ├── reconciler.test.js         # 22 tests
 │   ├── component.test.js          # 19 tests
 │   ├── hooks.test.js              # 10 tests
 │   ├── useEffect.test.js          # 18 tests
-│   └── events.test.js             # 24 tests
+│   ├── events.test.js             # 24 tests
+│   └── context.test.js            # 26 tests (Phase 7b)
 │
 ├── docs/                          # 📖 学习资料
 │   └── useState-flow.excalidraw   # useState 流程图
@@ -122,21 +128,25 @@ git log --oneline --all
 
 ### Git 提交历史（从早到新）
 
-| Commit    | 描述                                                     | 阶段    |
-| --------- | -------------------------------------------------------- | ------- |
-| `158b848` | 📋 添加详细实现计划 PLAN.md                              | 准备    |
-| `fe27d4b` | 🏗️ Phase 1 骨架 — createElement & render（含 TODO）      | Phase 1 |
-| `fefc69a` | ✅ Phase 1 实现 — 18 个测试通过                          | Phase 1 |
-| `492ceda` | ✅ Phase 2 — JSX 支持配置完成                            | Phase 2 |
-| `259e7df` | 🏗️ Phase 3 骨架 — reconciler/root（含 TODO）             | Phase 3 |
-| `24afc84` | ✅ Phase 3 — Reconciliation 初版                         | Phase 3 |
-| `2fa9f2e` | ✅ Phase 3 完整实现 — 36 个测试通过                      | Phase 3 |
-| `44ab371` | 🏗️ Phase 4 骨架 — 函数式组件（含 TODO）                  | Phase 4 |
-| `0e292bd` | ✅ Phase 4 实现 — 函数式组件支持                         | Phase 4 |
-| `257bbd4` | 🏗️ Phase 5 骨架 — useState（含 TODO）                    | Phase 5 |
-| `d49849d` | 🏗️ Phase 6 骨架 — useEffect/useRef/useReducer（含 TODO） | Phase 6 |
-| `b632a13` | ✅ Phase 6 实现 — 副作用管理                             | Phase 6 |
-| `8d8236f` | 🔄 重构 — 拆分为两阶段模型（Render + Commit）            | 进阶    |
+| Commit    | 描述                                                         | 阶段     |
+| --------- | ------------------------------------------------------------ | -------- |
+| `158b848` | 📋 添加详细实现计划 PLAN.md                                  | 准备     |
+| `fe27d4b` | 🏗️ Phase 1 骨架 — createElement & render（含 TODO）          | Phase 1  |
+| `fefc69a` | ✅ Phase 1 实现 — 18 个测试通过                              | Phase 1  |
+| `492ceda` | ✅ Phase 2 — JSX 支持配置完成                                | Phase 2  |
+| `259e7df` | 🏗️ Phase 3 骨架 — reconciler/root（含 TODO）                 | Phase 3  |
+| `24afc84` | ✅ Phase 3 — Reconciliation 初版                             | Phase 3  |
+| `2fa9f2e` | ✅ Phase 3 完整实现 — 36 个测试通过                          | Phase 3  |
+| `44ab371` | 🏗️ Phase 4 骨架 — 函数式组件（含 TODO）                      | Phase 4  |
+| `0e292bd` | ✅ Phase 4 实现 — 函数式组件支持                             | Phase 4  |
+| `257bbd4` | 🏗️ Phase 5 骨架 — useState（含 TODO）                        | Phase 5  |
+| `d49849d` | 🏗️ Phase 6 骨架 — useEffect/useRef/useReducer（含 TODO）     | Phase 6  |
+| `b632a13` | ✅ Phase 6 实现 — 副作用管理                                 | Phase 6  |
+| `8d8236f` | 🔄 重构 — 拆分为两阶段模型（Render + Commit）                | 进阶     |
+| `...`     | 🏗️ Phase 7 骨架 — 事件委托系统（含 TODO）                    | Phase 7  |
+| `...`     | ✅ Phase 7 实现 — 事件委托 + 24 个测试通过                   | Phase 7  |
+| `1073c56` | 🏗️ Phase 7b 骨架 — Context API & Memoization（含 TODO）      | Phase 7b |
+| `60ef6b4` | ✅ Phase 7b 实现 — Context/memo/useMemo/useCallback 26 tests | Phase 7b |
 
 > 💡 **标有 🏗️ 的是骨架提交**：代码中包含 `// TODO:` 注释，留给你亲手实现核心逻辑。
 
@@ -362,6 +372,78 @@ cat src/mini-react/reconciler.js
 
 ---
 
+### Phase 7：事件委托系统
+
+🎯 **目标**：理解 React 的事件委托机制——所有事件监听器委托到 root 容器上，从 O(n) 降到 O(1)。
+
+```bash
+# 1. 查看需要实现的文件
+cat src/mini-react/events.js       # 事件委托核心
+cat src/mini-react/render.js       # 属性设置中的事件处理
+cat src/mini-react/root.js         # 初始化事件委托
+
+# 2. 运行测试
+pnpm test:watch events
+
+# 3. ✍️ 实现事件委托、冒泡行为、多种事件类型支持
+
+# 4. 验证
+pnpm test                          # 24 个 events 测试全部通过
+pnpm dev                           # 查看 Phase 7 Playground（冒泡可视化 + 表单 + 动态列表）
+```
+
+**关键实现点：**
+
+- `setupEventDelegation(root)` — 在 root 容器上统一注册事件监听器
+- 事件冒泡：从 `event.target` 沿 DOM 树向上遍历，依次触发处理器
+- `__eventHandlers` — 在 DOM 节点上存储事件处理器映射
+- `render.js` 中识别 `on*` 属性并存储到 `__eventHandlers`
+
+---
+
+### Phase 7b：Context API & Memoization Hooks
+
+🎯 **目标**：理解 Context 如何解决 prop drilling，以及 memo/useMemo/useCallback 如何优化性能。
+
+```bash
+# 1. 切换到 Phase 7b 骨架
+git checkout 1073c56
+
+# 2. 查看需要实现的文件
+cat src/mini-react/context.js      # createContext / shallowEqual / memo TODO
+cat src/mini-react/hooks.js        # useContext / useMemo / useCallback TODO
+
+# 3. 运行测试，观察失败
+pnpm test:watch context
+
+# 4. ✍️ 推荐实现顺序：
+#    shallowEqual → createContext → useContext → useMemo → useCallback → memo
+
+# 5. 验证
+pnpm test                          # 全部 144 个测试通过
+pnpm dev                           # 查看 Phase 7b Playground
+
+# 6. 对比参考实现
+git diff 1073c56..60ef6b4 -- src/mini-react/
+```
+
+**关键实现点：**
+
+- `createContext(defaultValue)` — 创建含 `_currentValue` 和 `Provider` 组件的 context 对象
+- `useContext(context)` — 读取 `context._currentValue`（最简单的 hook，2 行代码）
+- `shallowEqual(objA, objB)` — 第一层属性用 `Object.is` 逐一比较
+- `useMemo(factory, deps)` — 依赖不变时返回缓存值（占用 hookIndex）
+- `useCallback(callback, deps)` — 语法糖，委托给 `useMemo(() => callback, deps)`
+- `memo(Component, areEqual)` — HOC，浅比较 props 跳过不必要的渲染
+
+**踩坑点（学习价值 ⭐）：**
+
+- Provider 返回 `children` 是数组（来自 `createElement`），需取单个子元素
+- memo 比较时需排除 `children`（每次 `createElement` 生成新的空数组引用）
+- 简化版 Context 的局限：全局 `_currentValue` 不支持嵌套 Provider（Phase 9 解决）
+
+---
+
 ## 🔄 常用 Git 操作
 
 ### 回到最新状态
@@ -413,7 +495,7 @@ git log --oneline -- src/mini-react/reconciler.js
 ## ✅ 测试
 
 ```bash
-# 运行全部 111 个测试
+# 运行全部 144 个测试
 pnpm test
 
 # 监听模式（文件变更自动重新运行）
@@ -421,6 +503,9 @@ pnpm test:watch
 
 # 只运行特定测试文件
 pnpm vitest run tests/reconciler.test.js
+
+# 只运行某个阶段的测试（按文件名匹配）
+pnpm test:watch context
 ```
 
 ### 测试覆盖
@@ -434,6 +519,7 @@ pnpm vitest run tests/reconciler.test.js
 | `hooks.test.js`         | 10     | Phase 5    |
 | `useEffect.test.js`     | 18     | Phase 6    |
 | `events.test.js`        | 24     | Phase 7    |
+| `context.test.js`       | 26     | Phase 7b   |
 
 ---
 
@@ -445,10 +531,10 @@ pnpm vitest run tests/reconciler.test.js
 - [x] Phase 4 — 函数式组件
 - [x] Phase 5 — `useState` Hook
 - [x] Phase 6 — `useEffect` / `useRef` / `useReducer`
-- [ ] Phase 7 — 事件委托系统
-- [ ] Phase 7b — Context API + `useMemo` / `useCallback` / `React.memo`
+- [x] Phase 7 — 事件委托系统
+- [x] Phase 7b — Context API + `useMemo` / `useCallback` / `React.memo`
 - [ ] Phase 8 — Fiber 架构（进阶）
-- [ ] Phase 9 — Fiber 源码级理解
+- [ ] Phase 9 — Fiber 源码级理解（含作用域化 Context 传播）
 - [ ] Phase 10 — 三层架构（React → Reconciler → Renderer）
 - [ ] Phase 11 — Concurrent Mode（并发模式）
 
